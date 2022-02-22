@@ -42,7 +42,7 @@ public:
 	std::vector<Spawner*> GetSpawnersInGroup(std::string group);
 	void Update(float deltaTime);
 	Entity* GetZoneControlObject() { return m_ZoneControlObject; }
-	bool GetPlayerLoseCoinOnDeath() { return m_PlayerLoseCoinsOnDeath; }
+	bool GetPlayerLoseCoinOnDeath() { return false; }
 
 private:
 	/**
