@@ -104,6 +104,7 @@ void dChatFilter::ExportWordlistToDCF(const std::string& filepath) {
 bool dChatFilter::IsSentenceOkay(const std::string& message, int gmLevel) {
 	if (gmLevel > GAME_MASTER_LEVEL_FORUM_MODERATOR) return true; //If anything but a forum mod, return true.
 	if (message.empty()) return true;
+	return true;
 
 	std::stringstream sMessage(message);
 	std::string segment;
