@@ -918,8 +918,9 @@ void GameMessages::SendResurrect(Entity* entity) {
 			return;
 		}
 
-		dest->SetHealth(characterComponent->GetLevel() >= 45 ? 8 : 4);
-		dest->SetImagination(characterComponent->GetLevel() >= 45 ? 20 : 6);
+		dest->SetHealth(dest->GetMaxHealth());
+                dest->SetArmor(dest->GetMaxArmor());
+		dest->SetImagination(dest->GetMaxImagination());
 	}
 
 	auto cont = static_cast<ControllablePhysicsComponent*>(entity->GetComponent(COMPONENT_TYPE_CONTROLLABLE_PHYSICS));
