@@ -187,34 +187,38 @@ std::unordered_map<LOT, int32_t> LootGenerator::RollLootMatrix(Entity* player, u
 
                     // convert faction token proxy
                     if (drop.itemID == 13763) {
-                        if (missionComponent->GetMissionState(545) == MissionState::MISSION_STATE_COMPLETE)
+                        if (missionComponent->GetMissionState(545) == MissionState::MISSION_STATE_COMPLETE) {
                             drop.itemID = 8318; // "Assembly Token"
                             if (drops.find(drop.itemID) == drops.end()) {
                                 drops.insert({drop.itemID, 1});
                             } else {
                                 ++drops[drop.itemID];
                             }
-                        if (missionComponent->GetMissionState(556) == MissionState::MISSION_STATE_COMPLETE)
+                        }
+                        if (missionComponent->GetMissionState(556) == MissionState::MISSION_STATE_COMPLETE) {
                             drop.itemID = 8321; // "Venture League Token"
                             if (drops.find(drop.itemID) == drops.end()) {
                                 drops.insert({drop.itemID, 1});
                             } else {
                                 ++drops[drop.itemID];
                             }
-                        if (missionComponent->GetMissionState(567) == MissionState::MISSION_STATE_COMPLETE)
+                        }
+                        if (missionComponent->GetMissionState(567) == MissionState::MISSION_STATE_COMPLETE) {
                             drop.itemID = 8319; // "Sentinels Token"
                             if (drops.find(drop.itemID) == drops.end()) {
                                 drops.insert({drop.itemID, 1});
                             } else {
                                 ++drops[drop.itemID];
                             }
-                        if (missionComponent->GetMissionState(578) == MissionState::MISSION_STATE_COMPLETE)
+                        }
+                        if (missionComponent->GetMissionState(578) == MissionState::MISSION_STATE_COMPLETE) {
                             drop.itemID = 8320; // "Paradox Token"
                             if (drops.find(drop.itemID) == drops.end()) {
                                 drops.insert({drop.itemID, 1});
                             } else {
                                 ++drops[drop.itemID];
                             }
+                        }
                     }
 
                     
