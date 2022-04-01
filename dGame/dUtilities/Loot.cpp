@@ -219,6 +219,12 @@ std::unordered_map<LOT, int32_t> LootGenerator::RollLootMatrix(Entity* player, u
                                 ++drops[drop.itemID];
                             }
                         }
+                    } else {
+                        if (drops.find(drop.itemID) == drops.end()) {
+                            drops.insert({drop.itemID, 1});
+                        } else {
+                            ++drops[drop.itemID];
+                        }
                     }
 
                     
