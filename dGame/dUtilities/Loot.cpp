@@ -183,10 +183,7 @@ std::unordered_map<LOT, int32_t> LootGenerator::RollLootMatrix(Entity* player, u
                     // filter out uneeded mission items
                     if (drop.isMissionDrop && !missionComponent->RequiresItem(drop.itemID))
                         continue;
-                    
-                    if (drop.itemID == 13763) {
-                        continue;
-                    } // check if we aren't in faction
+        
 
                     // convert faction token proxy
                     if (drop.itemID == 13763) {
