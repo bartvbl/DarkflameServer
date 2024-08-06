@@ -1,7 +1,5 @@
-/*
- * Darkflame Universe
- * Copyright 2019
- */
+// Darkflame Universe
+// Copyright 2024
 
 #ifndef RIGIDBODYPHANTOMPHYSICS_H
 #define RIGIDBODYPHANTOMPHYSICS_H
@@ -10,61 +8,30 @@
 #include "dCommonVars.h"
 #include "NiPoint3.h"
 #include "NiQuaternion.h"
-#include "Component.h"
+#include "PhysicsComponent.h"
+#include "eReplicaComponentType.h"
 
-/**
- * Component that handles rigid bodies that can be interacted with, mostly client-side rendered. An example is the
- * bananas that fall from trees in GF.
- */
-class RigidbodyPhantomPhysicsComponent : public Component {
+class dpEntity;
+
+ /**
+  * Component that handles rigid bodies that can be interacted with, mostly client-side rendered. An example is the
+  * bananas that fall from trees in GF.
+  */
+class RigidbodyPhantomPhysicsComponent : public PhysicsComponent {
 public:
-    static const uint32_t ComponentType = COMPONENT_TYPE_PHANTOM_PHYSICS;
-	
-    RigidbodyPhantomPhysicsComponent(Entity* parent);
-    ~RigidbodyPhantomPhysicsComponent() override;
-    
-    void Serialize(RakNet::BitStream* outBitStream, bool bIsInitialUpdate, unsigned int& flags);
+	static constexpr eReplicaComponentType ComponentType = eReplicaComponentType::RIGID_BODY_PHANTOM_PHYSICS;
 
-    /**
-     * Returns the position of this entity
-     * @return the position of this entity
-     */
-    NiPoint3& GetPosition() { return m_Position; }
+	RigidbodyPhantomPhysicsComponent(Entity* parent);
 
-    /**
-     * Sets the position of this entity
-     * @param pos the position to set
-     */
-    void SetPosition(const NiPoint3& pos) { m_Position = pos; m_IsDirty = true; }
+	void Update(const float deltaTime) override;
 
-    /**
-     * Returns the rotation of this entity
-     * @return the rotation of this entity
-     */
-    NiQuaternion& GetRotation() { return m_Rotation; }
+	void Serialize(RakNet::BitStream& outBitStream, bool bIsInitialUpdate) override;
 
-    /**
-     * Sets the rotation for this entity
-     * @param rot the rotation to tset
-     */
-    void SetRotation(const NiQuaternion& rot) { m_Rotation = rot; m_IsDirty = true; }
-
+	void SpawnVertices() const;
 private:
+	float m_Scale{};
 
-    /**
-     * The position of this entity
-     */
-    NiPoint3 m_Position;
-
-    /**
-     * The rotation of this entity
-     */
-    NiQuaternion m_Rotation;
-
-    /**
-     * Whether or not the component should be serialized
-     */
-    bool m_IsDirty;
+	dpEntity* m_dpEntity{};
 };
 
 #endif // RIGIDBODYPHANTOMPHYSICS_H

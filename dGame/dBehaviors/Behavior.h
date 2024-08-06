@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <map>
 #include <string>
@@ -6,7 +6,7 @@
 #include <unordered_map>
 
 #include "BitStream.h"
-#include "BehaviorTemplates.h"
+#include "BehaviorTemplate.h"
 #include "dCommonVars.h"
 
 struct BehaviorContext;
@@ -26,29 +26,29 @@ public:
 
 	static Behavior* CreateBehavior(uint32_t behaviorId);
 
-	static BehaviorTemplates GetBehaviorTemplate(uint32_t behaviorId);
+	static BehaviorTemplate GetBehaviorTemplate(uint32_t behaviorId);
 
 	/*
 	 * Utilities
 	 */
-	
+
 	void PlayFx(std::u16string type, LWOOBJID target, LWOOBJID secondary = LWOOBJID_EMPTY);
 
 	/*
 	 * Members
 	 */
-	
+
 	uint32_t m_behaviorId;
-	BehaviorTemplates m_templateId;
+	BehaviorTemplate m_templateId;
 	uint32_t m_effectId;
-	std::string* m_effectHandle = nullptr;
-	std::unordered_map<std::string, std::string>* m_effectNames = nullptr;
-	std::string* m_effectType = nullptr;
-	
+	std::string m_effectHandle;
+	std::unordered_map<std::string, std::string> m_effectNames;
+	std::string m_effectType;
+
 	/*
 	 * Behavior parameters
 	 */
-	
+
 	float GetFloat(const std::string& name, const float defaultValue = 0) const;
 
 	bool GetBoolean(const std::string& name, const bool defaultValue = false) const;
@@ -60,7 +60,7 @@ public:
 	Behavior* GetAction(float value) const;
 
 	std::map<std::string, float> GetParameterNames() const;
-	
+
 	/*
 	 * Virtual
 	 */
@@ -68,25 +68,31 @@ public:
 	virtual void Load();
 
 	// Player side
-	virtual void Handle(BehaviorContext* context, RakNet::BitStream* bitStream, BehaviorBranchContext branch);
-	
-	virtual void Sync(BehaviorContext* context, RakNet::BitStream* bitStream, BehaviorBranchContext branch);
+	virtual void Handle(BehaviorContext* context, RakNet::BitStream& bitStream, BehaviorBranchContext branch);
+
+	virtual void Sync(BehaviorContext* context, RakNet::BitStream& bitStream, BehaviorBranchContext branch);
 
 	virtual void UnCast(BehaviorContext* context, BehaviorBranchContext branch);
 
 	virtual void Timer(BehaviorContext* context, BehaviorBranchContext branch, LWOOBJID second);
-	
-	virtual void End(BehaviorContext* context, BehaviorBranchContext branch, LWOOBJID second);
-	
-	// Npc side
-	virtual void Calculate(BehaviorContext* context, RakNet::BitStream* bitStream, BehaviorBranchContext branch);
 
-	virtual void SyncCalculation(BehaviorContext* context, RakNet::BitStream* bitStream, BehaviorBranchContext branch);
+	virtual void End(BehaviorContext* context, BehaviorBranchContext branch, LWOOBJID second);
+
+	// Npc side
+	virtual void Calculate(BehaviorContext* context, RakNet::BitStream& bitStream, BehaviorBranchContext branch);
+
+	virtual void SyncCalculation(BehaviorContext* context, RakNet::BitStream& bitStream, BehaviorBranchContext branch);
 
 	/*
 	 * Creations/destruction
 	 */
-	
+
 	explicit Behavior(uint32_t behaviorId);
-	virtual ~Behavior();
+	virtual ~Behavior() = default;
+
+	Behavior(const Behavior& other) = default;
+	Behavior(Behavior&& other) = default;
+
+	Behavior& operator=(const Behavior& other) = default;
+	Behavior& operator=(Behavior&& other) = default;
 };

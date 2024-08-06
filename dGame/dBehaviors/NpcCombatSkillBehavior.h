@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "Behavior.h"
 
 class NpcCombatSkillBehavior final : public Behavior
@@ -12,11 +12,10 @@ public:
 	 * Inherited
 	 */
 
-	explicit NpcCombatSkillBehavior(const uint32_t behavior_id) : Behavior(behavior_id)
-	{
+	explicit NpcCombatSkillBehavior(const uint32_t behavior_id) : Behavior(behavior_id) {
 	}
-	
-	void Calculate(BehaviorContext* context, RakNet::BitStream* bit_stream, BehaviorBranchContext branch) override;
+
+	void Calculate(BehaviorContext* context, RakNet::BitStream& bit_stream, BehaviorBranchContext branch) override;
 
 	void Load() override;
 };

@@ -1,4 +1,4 @@
-﻿#define _USE_MATH_DEFINES
+#define _USE_MATH_DEFINES
 #include <cmath>
 #include "KnockbackBehavior.h"
 #include "BehaviorBranchContext.h"
@@ -6,35 +6,35 @@
 #include "EntityManager.h"
 #include "GameMessages.h"
 #include "DestroyableComponent.h"
+#include "Game.h"
+#include "Logger.h"
 
-void KnockbackBehavior::Handle(BehaviorContext* context, RakNet::BitStream* bitStream, BehaviorBranchContext branch)
-{
-	bool unknown;
+void KnockbackBehavior::Handle(BehaviorContext* context, RakNet::BitStream& bitStream, BehaviorBranchContext branch) {
+	bool unknown{};
 
-	bitStream->Read(unknown);
+	if (!bitStream.Read(unknown)) {
+		LOG("Unable to read unknown from bitStream, aborting Handle! %i", bitStream.GetNumberOfUnreadBits());
+		return;
+	};
 }
 
-void KnockbackBehavior::Calculate(BehaviorContext* context, RakNet::BitStream* bitStream, BehaviorBranchContext branch)
-{
+void KnockbackBehavior::Calculate(BehaviorContext* context, RakNet::BitStream& bitStream, BehaviorBranchContext branch) {
 	bool blocked = false;
 
-	auto* target = EntityManager::Instance()->GetEntity(branch.target);
+	auto* target = Game::entityManager->GetEntity(branch.target);
 
-	if (target != nullptr)
-	{
+	if (target != nullptr) {
 		auto* destroyableComponent = target->GetComponent<DestroyableComponent>();
 
-		if (destroyableComponent != nullptr)
-		{
+		if (destroyableComponent != nullptr) {
 			blocked = destroyableComponent->IsKnockbackImmune();
 		}
 	}
 
-	bitStream->Write(blocked);
+	bitStream.Write(blocked);
 }
 
-void KnockbackBehavior::Load()
-{
+void KnockbackBehavior::Load() {
 	this->m_strength = GetInt("strength");
 	this->m_angle = GetInt("angle");
 	this->m_relative = GetBoolean("relative");

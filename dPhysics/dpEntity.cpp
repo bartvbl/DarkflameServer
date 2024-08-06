@@ -3,8 +3,6 @@
 #include "dpShapeBox.h"
 #include "dpGrid.h"
 
-#include <iostream>
-
 dpEntity::dpEntity(const LWOOBJID& objectID, dpShapeType shapeType, bool isStatic) {
 	m_ObjectID = objectID;
 	m_IsStatic = isStatic;
@@ -22,7 +20,7 @@ dpEntity::dpEntity(const LWOOBJID& objectID, dpShapeType shapeType, bool isStati
 		break;
 
 	default:
-		std::cout << "No shape for shapeType: " << (int)shapeType << std::endl;
+		LOG("No shape for shapeType: %d", static_cast<int32_t>(shapeType));
 	}
 }
 
@@ -34,7 +32,6 @@ dpEntity::dpEntity(const LWOOBJID& objectID, NiPoint3 boxDimensions, bool isStat
 	m_CollisionGroup = COLLISION_GROUP_ALL;
 
 	m_CollisionShape = new dpShapeBox(this, boxDimensions.x, boxDimensions.y, boxDimensions.z);
-	if (boxDimensions.x > 100.0f) m_IsGargantuan = true;
 }
 
 dpEntity::dpEntity(const LWOOBJID& objectID, float width, float height, float depth, bool isStatic) {
@@ -45,7 +42,6 @@ dpEntity::dpEntity(const LWOOBJID& objectID, float width, float height, float de
 	m_CollisionGroup = COLLISION_GROUP_ALL;
 
 	m_CollisionShape = new dpShapeBox(this, width, height, depth);
-	if (width > 100.0f) m_IsGargantuan = true;
 }
 
 dpEntity::dpEntity(const LWOOBJID& objectID, float radius, bool isStatic) {
@@ -56,7 +52,6 @@ dpEntity::dpEntity(const LWOOBJID& objectID, float radius, bool isStatic) {
 	m_CollisionGroup = COLLISION_GROUP_ALL;
 
 	m_CollisionShape = new dpShapeSphere(this, radius);
-	if (radius > 200.0f) m_IsGargantuan = true;
 }
 
 dpEntity::~dpEntity() {
@@ -79,23 +74,17 @@ void dpEntity::CheckCollision(dpEntity* other) {
 		return;
 	}
 
-	bool wasFound = (m_CurrentlyCollidingObjects.find(other->GetObjectID()) != m_CurrentlyCollidingObjects.end());
-
-	bool isColliding = m_CollisionShape->IsColliding(other->GetShape());
+	const auto objId = other->GetObjectID();
+	const auto objItr = m_CurrentlyCollidingObjects.find(objId);
+	const bool wasFound = objItr != m_CurrentlyCollidingObjects.cend();
+	const bool isColliding = m_CollisionShape->IsColliding(other->GetShape());
 
 	if (isColliding && !wasFound) {
-		m_CurrentlyCollidingObjects.emplace(other->GetObjectID(), other);
-		m_NewObjects.push_back(other);
-
-		//if (m_CollisionShape->GetShapeType() == dpShapeType::Sphere && other->GetShape()->GetShapeType() == dpShapeType::Sphere)
-			//std::cout << "started sphere col at: " << other->GetPosition().x << ", " << other->GetPosition().y << ", " << other->GetPosition().z << std::endl;
-	}
-	else if (!isColliding && wasFound) {
-		m_CurrentlyCollidingObjects.erase(other->GetObjectID());
-		m_RemovedObjects.push_back(other);
-
-		//if (m_CollisionShape->GetShapeType() == dpShapeType::Sphere && other->GetShape()->GetShapeType() == dpShapeType::Sphere)
-		//	std::cout << "stopped sphere col at: " << other->GetPosition().x << ", " << other->GetPosition().y << ", " << other->GetPosition().z << std::endl;
+		m_CurrentlyCollidingObjects.emplace(objId);
+		m_NewObjects.push_back(objId);
+	} else if (!isColliding && wasFound) {
+		m_CurrentlyCollidingObjects.erase(objItr);
+		m_RemovedObjects.push_back(objId);
 	}
 }
 
@@ -147,5 +136,12 @@ void dpEntity::SetAngularVelocity(const NiPoint3& newAngularVelocity) {
 
 void dpEntity::SetGrid(dpGrid* grid) {
 	m_Grid = grid;
+
+	if (m_CollisionShape->GetShapeType() == dpShapeType::Sphere && static_cast<dpShapeSphere*>(m_CollisionShape)->GetRadius() * 2.0f > static_cast<float>(m_Grid->CELL_SIZE)) {
+		m_IsGargantuan = true;
+	} else if (m_CollisionShape->GetShapeType() == dpShapeType::Box && static_cast<dpShapeBox*>(m_CollisionShape)->GetWidth() > static_cast<float>(m_Grid->CELL_SIZE)) {
+		m_IsGargantuan = true;
+	}
+
 	m_Grid->Add(this);
 }

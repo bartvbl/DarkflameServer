@@ -7,20 +7,52 @@
 #include "dServer.h"
 #include <unordered_map>
 
+enum class eGameMasterLevel : uint8_t;
+
+struct IgnoreData {
+	IgnoreData(const std::string& name, const LWOOBJID& id) : playerName{ name }, playerId{ id } {}
+	inline bool operator==(const std::string& other) const noexcept {
+		return playerName == other;
+	}
+
+	inline bool operator==(const LWOOBJID& other) const noexcept {
+		return playerId == other;
+	}
+
+	LWOOBJID playerId = LWOOBJID_EMPTY;
+	std::string playerName;
+};
+
 struct PlayerData {
-	LWOOBJID playerID;
-	RakNet::RakString playerName;
-	SystemAddress sysAddr;
-	LWOZONEID zoneID;
-	std::vector<FriendData> friends;
-	time_t muteExpire;
+	operator bool() const noexcept {
+		return playerID != LWOOBJID_EMPTY;
+	}
+
+	bool operator==(const PlayerData& other) const noexcept {
+		return playerID == other.playerID;
+	}
+
+	bool GetIsMuted() const {
+		return muteExpire == 1 || muteExpire > time(NULL);
+	}
+
+	SystemAddress sysAddr{};
+	LWOZONEID zoneID{};
+	LWOOBJID playerID = LWOOBJID_EMPTY;
+	time_t muteExpire = 0;
 	uint8_t countOfBestFriends = 0;
+	std::string playerName;
+	std::vector<FriendData> friends;
+	std::vector<IgnoreData> ignoredPlayers;
+	eGameMasterLevel gmLevel = static_cast<eGameMasterLevel>(0); // CIVILLIAN
+	bool isFTP = false;
 };
 
 struct TeamData {
+	TeamData();
 	LWOOBJID teamID = LWOOBJID_EMPTY; // Internal use
 	LWOOBJID leaderID = LWOOBJID_EMPTY;
-	std::vector<LWOOBJID> memberIDs {};
+	std::vector<LWOOBJID> memberIDs{};
 	uint8_t lootFlag = 0;
 	bool local = false;
 	LWOZONEID zoneId = {};
@@ -28,31 +60,20 @@ struct TeamData {
 
 class PlayerContainer {
 public:
-	PlayerContainer();
-	~PlayerContainer();
-
+	void Initialize();
 	void InsertPlayer(Packet* packet);
 	void RemovePlayer(Packet* packet);
 	void MuteUpdate(Packet* packet);
 	void CreateTeamServer(Packet* packet);
 	void BroadcastMuteUpdate(LWOOBJID player, time_t time);
 
-	PlayerData* GetPlayerData(const LWOOBJID& playerID) {
-		auto it = mPlayers.find(playerID);
-		if (it != mPlayers.end()) return it->second;
-		return nullptr;
-	}
-
-	PlayerData* GetPlayerData(const std::string& playerName) {
-		for (auto player : mPlayers) {
-			if (player.second) {
-				std::string pn = player.second->playerName.C_String();
-				if (pn == playerName) return player.second;
-			}
-		}
-
-		return nullptr;
-	}
+	const PlayerData& GetPlayerData(const LWOOBJID& playerID);
+	const PlayerData& GetPlayerData(const std::string& playerName);
+	PlayerData& GetPlayerDataMutable(const LWOOBJID& playerID);
+	PlayerData& GetPlayerDataMutable(const std::string& playerName);
+	uint32_t GetPlayerCount() { return m_PlayerCount; };
+	uint32_t GetSimCount() { return m_SimCount; };
+	const std::map<LWOOBJID, PlayerData>& GetAllPlayers() { return m_Players; };
 
 	TeamData* CreateLocalTeam(std::vector<LWOOBJID> members);
 	TeamData* CreateTeam(LWOOBJID leader, bool local = false);
@@ -65,14 +86,17 @@ public:
 	void UpdateTeamsOnWorld(TeamData* team, bool deleteTeam);
 	std::u16string GetName(LWOOBJID playerID);
 	LWOOBJID GetId(const std::u16string& playerName);
-	bool GetIsMuted(PlayerData* data);
-
-	std::map<LWOOBJID, PlayerData*>& GetAllPlayerData() { return mPlayers; }
+	uint32_t GetMaxNumberOfBestFriends() { return m_MaxNumberOfBestFriends; }
+	uint32_t GetMaxNumberOfFriends() { return m_MaxNumberOfFriends; }
 
 private:
-	LWOOBJID mTeamIDCounter = 0;
-	std::map<LWOOBJID, PlayerData*> mPlayers;
+	LWOOBJID m_TeamIDCounter = 0;
+	std::map<LWOOBJID, PlayerData> m_Players;
 	std::vector<TeamData*> mTeams;
-	std::unordered_map<LWOOBJID, std::u16string> mNames;
+	std::unordered_map<LWOOBJID, std::u16string> m_Names;
+	uint32_t m_MaxNumberOfBestFriends = 5;
+	uint32_t m_MaxNumberOfFriends = 50;
+	uint32_t m_PlayerCount = 0;
+	uint32_t m_SimCount = 0;
 };
 

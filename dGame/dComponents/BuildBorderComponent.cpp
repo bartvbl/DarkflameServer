@@ -4,30 +4,27 @@
 #include "GameMessages.h"
 #include "Entity.h"
 #include "Game.h"
-#include "dLogger.h"
+#include "Logger.h"
 #include "InventoryComponent.h"
 #include "Item.h"
 #include "PropertyManagementComponent.h"
 
-BuildBorderComponent::BuildBorderComponent(Entity* parent) : Component(parent)
-{
+BuildBorderComponent::BuildBorderComponent(Entity* parent) : Component(parent) {
 }
 
-BuildBorderComponent::~BuildBorderComponent()
-{
+BuildBorderComponent::~BuildBorderComponent() {
 }
 
 void BuildBorderComponent::OnUse(Entity* originator) {
 	if (originator->GetCharacter()) {
-		const auto& entities = EntityManager::Instance()->GetEntitiesInGroup("PropertyPlaque");
+		const auto& entities = Game::entityManager->GetEntitiesInGroup("PropertyPlaque");
 
 		auto buildArea = m_Parent->GetObjectID();
 
-		if (!entities.empty())
-		{
+		if (!entities.empty()) {
 			buildArea = entities[0]->GetObjectID();
-			
-			Game::logger->Log("BuildBorderComponent", "Using PropertyPlaque\n");
+
+			LOG("Using PropertyPlaque");
 		}
 
 		auto* inventoryComponent = originator->GetComponent<InventoryComponent>();
@@ -44,7 +41,7 @@ void BuildBorderComponent::OnUse(Entity* originator) {
 
 		inventoryComponent->PushEquippedItems();
 
-		Game::logger->Log("BuildBorderComponent", "Starting with %llu\n", buildArea);
+		LOG("Starting with %llu", buildArea);
 
 		if (PropertyManagementComponent::Instance() != nullptr) {
 			GameMessages::SendStartArrangingWithItem(
@@ -59,11 +56,10 @@ void BuildBorderComponent::OnUse(Entity* originator) {
 				4,
 				0,
 				-1,
-				NiPoint3::ZERO,
+				NiPoint3Constant::ZERO,
 				0
 			);
-		}
-		else {
+		} else {
 			GameMessages::SendStartArrangingWithItem(originator, originator->GetSystemAddress(), true, buildArea, originator->GetPosition());
 		}
 

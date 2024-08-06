@@ -9,10 +9,11 @@
 #include <string>
 #include <functional>
 #include "LDFFormat.h"
+#include "EntityInfo.h"
 
 struct SpawnerNode {
-	NiPoint3 position = NiPoint3::ZERO;
-	NiQuaternion rotation = NiQuaternion::IDENTITY;
+	NiPoint3 position = NiPoint3Constant::ZERO;
+	NiQuaternion rotation = NiQuaternionConstant::IDENTITY;
 	uint32_t nodeID = 0;
 	uint32_t nodeMax = 1;
 	std::vector<LWOOBJID> entities;
@@ -37,15 +38,15 @@ struct SpawnerInfo {
 	bool noTimedSpawn = false;
 	std::string grpNameQBShowBricks = "";
 	bool spawnActivator = true;
-	
+
 	bool emulated = false;
 	LWOOBJID emulator = LWOOBJID_EMPTY;
 };
 
 class Spawner {
 public:
-    Spawner(SpawnerInfo info);
-    ~Spawner();
+	Spawner(SpawnerInfo info);
+	~Spawner();
 
 	Entity* Spawn();
 	Entity* Spawn(std::vector<SpawnerNode*> freeNodes, bool force = false);
@@ -60,16 +61,18 @@ public:
 	void AddEntitySpawnedCallback(std::function<void(Entity*)> callback);
 	void SetSpawnLot(LOT lot);
 	void Reset();
+	void DestroyAllEntities();
 	void SoftReset();
 	void SetRespawnTime(float time);
 	void SetNumToMaintain(int32_t value);
 	bool GetIsSpawnSmashGroup() const { return m_SpawnSmashFoundGroup; };
+	std::vector<LWOOBJID> GetSpawnedObjectIDs() const;
 
 	SpawnerInfo m_Info;
 	bool m_Active = true;
 private:
 	std::vector<std::function<void()>> m_SpawnedEntityDieCallbacks = {};
-    std::vector<std::function<void(Entity*)>> m_EntitySpawnedCallbacks = {};
+	std::vector<std::function<void(Entity*)>> m_EntitySpawnedCallbacks = {};
 
 
 	bool m_SpawnSmashFoundGroup = false;

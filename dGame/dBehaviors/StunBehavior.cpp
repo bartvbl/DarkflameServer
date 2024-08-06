@@ -1,28 +1,30 @@
-﻿#include "StunBehavior.h"
+#include "StunBehavior.h"
 
 #include "BaseCombatAIComponent.h"
 #include "BehaviorBranchContext.h"
 #include "BehaviorContext.h"
 #include "EntityManager.h"
 #include "Game.h"
-#include "dLogger.h"
+#include "Logger.h"
 #include "DestroyableComponent.h"
+#include "eReplicaComponentType.h"
 
 
-void StunBehavior::Handle(BehaviorContext* context, RakNet::BitStream* bitStream, const BehaviorBranchContext branch)
-{
+void StunBehavior::Handle(BehaviorContext* context, RakNet::BitStream& bitStream, const BehaviorBranchContext branch) {
 	if (this->m_stunCaster || branch.target == context->originator) {
 		return;
 	}
 
-	bool blocked;
-	bitStream->Read(blocked);
+	bool blocked{};
+	if (!bitStream.Read(blocked)) {
+		LOG("Unable to read blocked from bitStream, aborting Handle! %i", bitStream.GetNumberOfUnreadBits());
+		return;
+	};
 
-	auto* target = EntityManager::Instance()->GetEntity(branch.target);
+	auto* target = Game::entityManager->GetEntity(branch.target);
 
-	if (target == nullptr)
-	{
-		Game::logger->Log("StunBehavior", "Failed to find target (%llu)!\n", branch.target);
+	if (target == nullptr) {
+		LOG("Failed to find target (%llu)!", branch.target);
 
 		return;
 	}
@@ -30,26 +32,22 @@ void StunBehavior::Handle(BehaviorContext* context, RakNet::BitStream* bitStream
 	/*
 	 * If our target is an enemy we can go ahead and stun it.
 	 */
-	
-	auto* combatAiComponent = static_cast<BaseCombatAIComponent*>(target->GetComponent(COMPONENT_TYPE_BASE_COMBAT_AI));
 
-	if (combatAiComponent == nullptr)
-	{
+	auto* combatAiComponent = static_cast<BaseCombatAIComponent*>(target->GetComponent(eReplicaComponentType::BASE_COMBAT_AI));
+
+	if (combatAiComponent == nullptr) {
 		return;
 	}
 
 	combatAiComponent->Stun(branch.duration);
 }
 
-void StunBehavior::Calculate(BehaviorContext* context, RakNet::BitStream* bitStream, const BehaviorBranchContext branch)
-{
-	if (this->m_stunCaster || branch.target == context->originator)
-	{
-		auto* self = EntityManager::Instance()->GetEntity(context->originator);
+void StunBehavior::Calculate(BehaviorContext* context, RakNet::BitStream& bitStream, const BehaviorBranchContext branch) {
+	if (this->m_stunCaster || branch.target == context->originator) {
+		auto* self = Game::entityManager->GetEntity(context->originator);
 
-		if (self == nullptr)
-		{
-			Game::logger->Log("StunBehavior", "Invalid self entity (%llu)!\n", context->originator);
+		if (self == nullptr) {
+			LOG("Invalid self entity (%llu)!", context->originator);
 
 			return;
 		}
@@ -57,38 +55,34 @@ void StunBehavior::Calculate(BehaviorContext* context, RakNet::BitStream* bitStr
 		/*
 		 * See if we can stun ourselves
 		 */
-		
-		auto* combatAiComponent = static_cast<BaseCombatAIComponent*>(self->GetComponent(COMPONENT_TYPE_BASE_COMBAT_AI));
 
-		if (combatAiComponent == nullptr)
-		{
+		auto* combatAiComponent = static_cast<BaseCombatAIComponent*>(self->GetComponent(eReplicaComponentType::BASE_COMBAT_AI));
+
+		if (combatAiComponent == nullptr) {
 			return;
 		}
 
 		combatAiComponent->Stun(branch.duration);
-		
+
 		return;
 	}
 
 	bool blocked = false;
 
-	auto* target = EntityManager::Instance()->GetEntity(branch.target);
+	auto* target = Game::entityManager->GetEntity(branch.target);
 
-	if (target != nullptr)
-	{
+	if (target != nullptr) {
 		auto* destroyableComponent = target->GetComponent<DestroyableComponent>();
 
-		if (destroyableComponent != nullptr)
-		{
+		if (destroyableComponent != nullptr) {
 			blocked = destroyableComponent->IsKnockbackImmune();
 		}
 	}
 
-	bitStream->Write(blocked);
+	bitStream.Write(blocked);
 
-	if (target == nullptr)
-	{
-		Game::logger->Log("StunBehavior", "Failed to find target (%llu)!\n", branch.target);
+	if (target == nullptr) {
+		LOG("Failed to find target (%llu)!", branch.target);
 
 		return;
 	}
@@ -97,17 +91,15 @@ void StunBehavior::Calculate(BehaviorContext* context, RakNet::BitStream* bitStr
 	 * If our target is an enemy we can go ahead and stun it.
 	 */
 
-	auto* combatAiComponent = static_cast<BaseCombatAIComponent*>(target->GetComponent(COMPONENT_TYPE_BASE_COMBAT_AI));
+	auto* combatAiComponent = static_cast<BaseCombatAIComponent*>(target->GetComponent(eReplicaComponentType::BASE_COMBAT_AI));
 
-	if (combatAiComponent == nullptr)
-	{
+	if (combatAiComponent == nullptr) {
 		return;
 	}
 
 	combatAiComponent->Stun(branch.duration);
 }
 
-void StunBehavior::Load()
-{
+void StunBehavior::Load() {
 	this->m_stunCaster = GetBoolean("stun_caster");
 }

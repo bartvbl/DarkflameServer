@@ -4,15 +4,15 @@
 #include "EntityManager.h"
 #include "GameMessages.h"
 #include "Character.h"
+#include "eMissionState.h"
 
-void Darkitect::Reveal(Entity* self, Entity* player)
-{
+void Darkitect::Reveal(Entity* self, Entity* player) {
 	const auto playerID = player->GetObjectID();
 
 	GameMessages::SendNotifyClientObject(self->GetObjectID(), u"reveal", 0, 0, playerID, "", player->GetSystemAddress());
 
 	self->AddCallbackTimer(20, [this, self, playerID]() {
-		auto* player = EntityManager::Instance()->GetEntity(playerID);
+		auto* player = Game::entityManager->GetEntity(playerID);
 
 		if (!player) return;
 
@@ -25,11 +25,11 @@ void Darkitect::Reveal(Entity* self, Entity* player)
 			destroyableComponent->SetHealth(1);
 			destroyableComponent->SetImagination(0);
 
-			if (missionComponent->GetMissionState(1295) == MissionState::MISSION_STATE_ACTIVE) {
+			if (missionComponent->GetMissionState(1295) == eMissionState::ACTIVE) {
 				character->SetPlayerFlag(1911, true);
 			}
 
-			EntityManager::Instance()->SerializeEntity(player);
+			Game::entityManager->SerializeEntity(player);
 		}
-	});
+		});
 }

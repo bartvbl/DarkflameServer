@@ -1,88 +1,88 @@
-﻿#include "SwitchBehavior.h"
+#include "SwitchBehavior.h"
 #include "BehaviorBranchContext.h"
 #include "EntityManager.h"
-#include "dLogger.h"
+#include "Logger.h"
 #include "DestroyableComponent.h"
 #include "BehaviorContext.h"
 #include "BuffComponent.h"
 
-void SwitchBehavior::Handle(BehaviorContext* context, RakNet::BitStream* bitStream, const BehaviorBranchContext branch)
-{
-	auto state = true;
+void SwitchBehavior::Handle(BehaviorContext* context, RakNet::BitStream& bitStream, const BehaviorBranchContext branch) {
+	bool state = true;
 
-	if (this->m_imagination > 0 || !this->m_isEnemyFaction)
-	{
-		bitStream->Read(state);
+	if (m_imagination > 0 || m_targetHasBuff > 0 || m_Distance > -1.0f) {
+		if (!bitStream.Read(state)) {
+			LOG("Unable to read state from bitStream, aborting Handle! %i", bitStream.GetNumberOfUnreadBits());
+			return;
+		};
 	}
 
-    auto* entity = EntityManager::Instance()->GetEntity(context->originator);
+	auto* entity = Game::entityManager->GetEntity(context->originator);
 
-    if (entity == nullptr)
-    {
-        return;
-    }
+	if (!entity) return;
 
-    auto* destroyableComponent = entity->GetComponent<DestroyableComponent>();
-	
-	if (destroyableComponent == nullptr)
-	{
-		return;
+	auto* destroyableComponent = entity->GetComponent<DestroyableComponent>();
+
+	if (destroyableComponent) {
+		if (m_isEnemyFaction) {
+			auto* target = Game::entityManager->GetEntity(branch.target);
+			if (target) state = destroyableComponent->IsEnemy(target);
+		}
+
+		LOG_DEBUG("[%i] State: (%d), imagination: (%i) / (%f)", entity->GetLOT(), state, destroyableComponent->GetImagination(), destroyableComponent->GetMaxImagination());
 	}
 
-    Game::logger->Log("SwitchBehavior", "[%i] State: (%d), imagination: (%i) / (%f)\n", entity->GetLOT(), state, destroyableComponent->GetImagination(), destroyableComponent->GetMaxImagination());
-
-	if (state || (entity->GetLOT() == 8092 && destroyableComponent->GetImagination() >= m_imagination))
-	{
-		this->m_actionTrue->Handle(context, bitStream, branch);
-	}
-	else
-	{
-		this->m_actionFalse->Handle(context, bitStream, branch);
-	}
+	auto* behaviorToCall = state ? m_actionTrue : m_actionFalse;
+	behaviorToCall->Handle(context, bitStream, branch);
 }
 
-void SwitchBehavior::Calculate(BehaviorContext* context, RakNet::BitStream* bitStream, BehaviorBranchContext branch)
-{
-	auto state = true;
-	
-	if (this->m_imagination > 0 || !this->m_isEnemyFaction)
-	{
-		auto* entity = EntityManager::Instance()->GetEntity(branch.target);
+void SwitchBehavior::Calculate(BehaviorContext* context, RakNet::BitStream& bitStream, BehaviorBranchContext branch) {
+	bool state = true;
+	if (m_imagination > 0 || m_targetHasBuff > 0 || m_Distance > -1.0f) {
+		auto* entity = Game::entityManager->GetEntity(branch.target);
 
 		state = entity != nullptr;
 
-		if (state && m_targetHasBuff != 0)
-		{
-		    auto* buffComponent = entity->GetComponent<BuffComponent>();
+		if (state) {
+			if (m_targetHasBuff != 0) {
+				auto* buffComponent = entity->GetComponent<BuffComponent>();
 
-			if (buffComponent != nullptr && !buffComponent->HasBuff(m_targetHasBuff))
-			{
-				state = false;
+				if (buffComponent != nullptr && !buffComponent->HasBuff(m_targetHasBuff)) {
+					state = false;
+				}
+			} else if (m_imagination > 0) {
+				auto* destroyableComponent = entity->GetComponent<DestroyableComponent>();
+
+				if (destroyableComponent && destroyableComponent->GetImagination() < m_imagination) {
+					state = false;
+				}
+			} else if (m_Distance > -1.0f) {
+				auto* originator = Game::entityManager->GetEntity(context->originator);
+
+				if (originator) {
+					const auto distance = (originator->GetPosition() - entity->GetPosition()).Length();
+
+					state = distance <= m_Distance;
+				}
 			}
 		}
 
-		bitStream->Write(state);
+		bitStream.Write(state);
 	}
 
-	if (state)
-	{
-		this->m_actionTrue->Calculate(context, bitStream, branch);
-	}
-	else
-	{
-		this->m_actionFalse->Calculate(context, bitStream, branch);
-	}
+	auto* behaviorToCall = state ? m_actionTrue : m_actionFalse;
+	behaviorToCall->Calculate(context, bitStream, branch);
 }
 
-void SwitchBehavior::Load()
-{
+void SwitchBehavior::Load() {
 	this->m_actionTrue = GetAction("action_true");
-	
+
 	this->m_actionFalse = GetAction("action_false");
-	
+
 	this->m_imagination = GetInt("imagination");
-	
+
 	this->m_isEnemyFaction = GetBoolean("isEnemyFaction");
 
-	this->m_targetHasBuff = GetInt("target_has_buff");
+	this->m_targetHasBuff = GetInt("target_has_buff", -1);
+
+	this->m_Distance = GetFloat("distance", -1.0f);
 }

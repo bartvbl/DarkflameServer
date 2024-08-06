@@ -25,11 +25,10 @@ public:
 	 * Inherited
 	 */
 
-	explicit VentureVisionBehavior(const uint32_t behaviorId) : Behavior(behaviorId)
-	{
+	explicit VentureVisionBehavior(const uint32_t behaviorId) : Behavior(behaviorId) {
 	}
-	
-	void Handle(BehaviorContext* context, RakNet::BitStream* bitStream, BehaviorBranchContext branch) override;
+
+	void Handle(BehaviorContext* context, RakNet::BitStream& bitStream, BehaviorBranchContext branch) override;
 
 	void UnCast(BehaviorContext* context, BehaviorBranchContext branch) override;
 

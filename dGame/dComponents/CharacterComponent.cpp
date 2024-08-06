@@ -1,8 +1,8 @@
 #include "CharacterComponent.h"
-#include <BitStream.h>
+#include "BitStream.h"
 #include "tinyxml2.h"
 #include "Game.h"
-#include "dLogger.h"
+#include "Logger.h"
 #include "GeneralUtils.h"
 #include "dServer.h"
 #include "dZoneManager.h"
@@ -10,18 +10,27 @@
 #include "InventoryComponent.h"
 #include "ControllablePhysicsComponent.h"
 #include "EntityManager.h"
-#include "VehiclePhysicsComponent.h"
+#include "HavokVehiclePhysicsComponent.h"
 #include "GameMessages.h"
 #include "Item.h"
+#include "Amf3.h"
+#include "eGameMasterLevel.h"
+#include "eGameActivity.h"
+#include "User.h"
+#include "Database.h"
+#include "CDRewardCodesTable.h"
+#include "Mail.h"
+#include "ZoneInstanceManager.h"
+#include "WorldPackets.h"
+#include <ctime>
 
-CharacterComponent::CharacterComponent(Entity* parent, Character* character) : Component(parent) {
+CharacterComponent::CharacterComponent(Entity* parent, Character* character, const SystemAddress& systemAddress) : Component(parent) {
 	m_Character = character;
 
 	m_IsRacing = false;
 	m_IsGM = false;
 	m_IsLanding = false;
 	m_IsLEGOClubMember = true;
-	m_Level = 1;
 
 	m_DirtyCurrentActivity = false;
 	m_DirtyGMInfo = false;
@@ -32,33 +41,23 @@ CharacterComponent::CharacterComponent(Entity* parent, Character* character) : C
 
 	m_EditorEnabled = false;
 	m_EditorLevel = m_GMLevel;
-    m_Reputation = 0;
+	m_Reputation = 0;
 
-	m_CurrentActivity = 0;
+	m_CurrentActivity = eGameActivity::NONE;
 	m_CountryCode = 0;
 	m_LastUpdateTimestamp = std::time(nullptr);
-
-	LoadFromXML();
-
-	//Check to see if we're landing:
-	if (character->GetZoneID() != Game::server->GetZoneID()) {
-		m_IsLanding = true;
-	}
-    
-	if (LandingAnimDisabled(character->GetZoneID()) || LandingAnimDisabled(Game::server->GetZoneID()) || m_LastRocketConfig.empty()) {
-		m_IsLanding = false; //Don't make us land on VE/minigames lol
-	}
+	m_SystemAddress = systemAddress;
 }
 
 bool CharacterComponent::LandingAnimDisabled(int zoneID) {
 	switch (zoneID) {
 	case 0:
 	case 556:
-	case 1001:
 	case 1101:
 	case 1202:
 	case 1203:
 	case 1204:
+	case 1261:
 	case 1301:
 	case 1302:
 	case 1303:
@@ -79,239 +78,189 @@ bool CharacterComponent::LandingAnimDisabled(int zoneID) {
 CharacterComponent::~CharacterComponent() {
 }
 
-void CharacterComponent::Serialize(RakNet::BitStream* outBitStream, bool bIsInitialUpdate, unsigned int& flags) {
-	outBitStream->Write1();
-	outBitStream->Write(m_Level);
-	outBitStream->Write0();
-	
+void CharacterComponent::Serialize(RakNet::BitStream& outBitStream, bool bIsInitialUpdate) {
+
 	if (bIsInitialUpdate) {
-		outBitStream->Write0();
-		outBitStream->Write0();
-		outBitStream->Write0();
-		outBitStream->Write0();
-		
-		outBitStream->Write(m_Character->GetHairColor());
-		outBitStream->Write(m_Character->GetHairStyle());
-		outBitStream->Write<uint32_t>(0); //Default "head"
-		outBitStream->Write(m_Character->GetShirtColor());
-		outBitStream->Write(m_Character->GetPantsColor());
-		outBitStream->Write(m_Character->GetShirtStyle());
-		outBitStream->Write<uint32_t>(0); //Default "head color"
-		outBitStream->Write(m_Character->GetEyebrows());
-		outBitStream->Write(m_Character->GetEyes());
-		outBitStream->Write(m_Character->GetMouth());
-		outBitStream->Write<uint64_t>(0); //AccountID, trying out if 0 works.
-		outBitStream->Write(m_Character->GetLastLogin()); //Last login
-		outBitStream->Write<uint64_t>(0); //"prop mod last display time"
-		outBitStream->Write<uint64_t>(m_Uscore); //u-score
-		outBitStream->Write0(); //Not free-to-play (disabled in DLU)
+		outBitStream.Write(m_ClaimCodes[0] != 0);
+		if (m_ClaimCodes[0] != 0) outBitStream.Write(m_ClaimCodes[0]);
+		outBitStream.Write(m_ClaimCodes[1] != 0);
+		if (m_ClaimCodes[1] != 0) outBitStream.Write(m_ClaimCodes[1]);
+		outBitStream.Write(m_ClaimCodes[2] != 0);
+		if (m_ClaimCodes[2] != 0) outBitStream.Write(m_ClaimCodes[2]);
+		outBitStream.Write(m_ClaimCodes[3] != 0);
+		if (m_ClaimCodes[3] != 0) outBitStream.Write(m_ClaimCodes[3]);
+
+		outBitStream.Write(m_Character->GetHairColor());
+		outBitStream.Write(m_Character->GetHairStyle());
+		outBitStream.Write<uint32_t>(0); //Default "head"
+		outBitStream.Write(m_Character->GetShirtColor());
+		outBitStream.Write(m_Character->GetPantsColor());
+		outBitStream.Write(m_Character->GetShirtStyle());
+		outBitStream.Write<uint32_t>(0); //Default "head color"
+		outBitStream.Write(m_Character->GetEyebrows());
+		outBitStream.Write(m_Character->GetEyes());
+		outBitStream.Write(m_Character->GetMouth());
+		outBitStream.Write<uint64_t>(0); //AccountID, trying out if 0 works.
+		outBitStream.Write(m_Character->GetLastLogin()); //Last login
+		outBitStream.Write<uint64_t>(0); //"prop mod last display time"
+		outBitStream.Write<uint64_t>(m_Uscore); //u-score
+		outBitStream.Write0(); //Not free-to-play (disabled in DLU)
 
 		//Stats:
-		outBitStream->Write(m_CurrencyCollected);
-		outBitStream->Write(m_BricksCollected);
-		outBitStream->Write(m_SmashablesSmashed);
-		outBitStream->Write(m_QuickBuildsCompleted);
-		outBitStream->Write(m_EnemiesSmashed);
-		outBitStream->Write(m_RocketsUsed);
-		outBitStream->Write(m_MissionsCompleted);
-		outBitStream->Write(m_PetsTamed);
-		outBitStream->Write(m_ImaginationPowerUpsCollected);
-		outBitStream->Write(m_LifePowerUpsCollected);
-		outBitStream->Write(m_ArmorPowerUpsCollected);
-		outBitStream->Write(m_MetersTraveled);
-		outBitStream->Write(m_TimesSmashed);
-		outBitStream->Write(m_TotalDamageTaken);
-		outBitStream->Write(m_TotalDamageHealed);
-		outBitStream->Write(m_TotalArmorRepaired);
-		outBitStream->Write(m_TotalImaginationRestored);
-		outBitStream->Write(m_TotalImaginationUsed);
-		outBitStream->Write(m_DistanceDriven);
-		outBitStream->Write(m_TimeAirborneInCar);
-		outBitStream->Write(m_RacingImaginationPowerUpsCollected);
-		outBitStream->Write(m_RacingImaginationCratesSmashed);
-		outBitStream->Write(m_RacingCarBoostsActivated);
-		outBitStream->Write(m_RacingTimesWrecked);
-		outBitStream->Write(m_RacingSmashablesSmashed);
-		outBitStream->Write(m_RacesFinished);
-		outBitStream->Write(m_FirstPlaceRaceFinishes);
-		
-		outBitStream->Write0();
-		outBitStream->Write(m_IsLanding);
+		outBitStream.Write(m_CurrencyCollected);
+		outBitStream.Write(m_BricksCollected);
+		outBitStream.Write(m_SmashablesSmashed);
+		outBitStream.Write(m_QuickBuildsCompleted);
+		outBitStream.Write(m_EnemiesSmashed);
+		outBitStream.Write(m_RocketsUsed);
+		outBitStream.Write(m_MissionsCompleted);
+		outBitStream.Write(m_PetsTamed);
+		outBitStream.Write(m_ImaginationPowerUpsCollected);
+		outBitStream.Write(m_LifePowerUpsCollected);
+		outBitStream.Write(m_ArmorPowerUpsCollected);
+		outBitStream.Write(m_MetersTraveled);
+		outBitStream.Write(m_TimesSmashed);
+		outBitStream.Write(m_TotalDamageTaken);
+		outBitStream.Write(m_TotalDamageHealed);
+		outBitStream.Write(m_TotalArmorRepaired);
+		outBitStream.Write(m_TotalImaginationRestored);
+		outBitStream.Write(m_TotalImaginationUsed);
+		outBitStream.Write(m_DistanceDriven);
+		outBitStream.Write(m_TimeAirborneInCar);
+		outBitStream.Write(m_RacingImaginationPowerUpsCollected);
+		outBitStream.Write(m_RacingImaginationCratesSmashed);
+		outBitStream.Write(m_RacingCarBoostsActivated);
+		outBitStream.Write(m_RacingTimesWrecked);
+		outBitStream.Write(m_RacingSmashablesSmashed);
+		outBitStream.Write(m_RacesFinished);
+		outBitStream.Write(m_FirstPlaceRaceFinishes);
+
+		outBitStream.Write0();
+		outBitStream.Write(m_IsLanding);
 		if (m_IsLanding) {
-			outBitStream->Write(uint16_t(m_LastRocketConfig.size()));
+			outBitStream.Write<uint16_t>(m_LastRocketConfig.size());
 			for (uint16_t character : m_LastRocketConfig) {
-				outBitStream->Write(character);
+				outBitStream.Write(character);
 			}
 		}
 	}
 
-	outBitStream->Write(m_DirtyGMInfo);
+	outBitStream.Write(m_DirtyGMInfo);
 	if (m_DirtyGMInfo) {
-		outBitStream->Write(m_PvpEnabled);
-		outBitStream->Write(m_IsGM);
-		outBitStream->Write(m_GMLevel);
-		outBitStream->Write(m_EditorEnabled);
-		outBitStream->Write(m_EditorLevel);
+		outBitStream.Write(m_PvpEnabled);
+		outBitStream.Write(m_IsGM);
+		outBitStream.Write(m_GMLevel);
+		outBitStream.Write(m_EditorEnabled);
+		outBitStream.Write(m_EditorLevel);
 	}
-	
-	outBitStream->Write(m_DirtyCurrentActivity);
-	if (m_DirtyCurrentActivity) outBitStream->Write(m_CurrentActivity);
-	
-	outBitStream->Write(m_DirtySocialInfo);
+
+	outBitStream.Write(m_DirtyCurrentActivity);
+	if (m_DirtyCurrentActivity) outBitStream.Write(m_CurrentActivity);
+
+	outBitStream.Write(m_DirtySocialInfo);
 	if (m_DirtySocialInfo) {
-		outBitStream->Write(m_GuildID);
-		outBitStream->Write<unsigned char>(static_cast<unsigned char>(m_GuildName.size()));
+		outBitStream.Write(m_GuildID);
+		outBitStream.Write<unsigned char>(m_GuildName.size());
 		if (!m_GuildName.empty())
-			outBitStream->WriteBits(reinterpret_cast<const unsigned char*>(m_GuildName.c_str()), static_cast<unsigned char>(m_GuildName.size()) * sizeof(wchar_t) * 8);
-		
-		outBitStream->Write(m_IsLEGOClubMember);
-		outBitStream->Write(m_CountryCode);
+			outBitStream.WriteBits(reinterpret_cast<const unsigned char*>(m_GuildName.c_str()), static_cast<unsigned char>(m_GuildName.size()) * sizeof(wchar_t) * 8);
+
+		outBitStream.Write(m_IsLEGOClubMember);
+		outBitStream.Write(m_CountryCode);
 	}
 }
 
-bool CharacterComponent::GetPvpEnabled() const
-{
+bool CharacterComponent::GetPvpEnabled() const {
 	return m_PvpEnabled;
 }
 
-void CharacterComponent::SetPvpEnabled(const bool value)
-{
+void CharacterComponent::SetPvpEnabled(const bool value) {
 	m_DirtyGMInfo = true;
-	
+
 	m_PvpEnabled = value;
 }
 
-void CharacterComponent::HandleLevelUp()
-{
-	auto* rewardsTable = CDClientManager::Instance()->GetTable<CDRewardsTable>("Rewards");
-
-	const auto& rewards = rewardsTable->GetByLevelID(m_Level);
-    bool rewardingItem = rewards.size() > 0;
-
-	auto* parent = m_Character->GetEntity();
-
-	if (parent == nullptr)
-	{
-		return;
-	}
-
-	auto* inventoryComponent = parent->GetComponent<InventoryComponent>();
-	auto* controllablePhysicsComponent = parent->GetComponent<ControllablePhysicsComponent>();
-
-	if (inventoryComponent == nullptr || controllablePhysicsComponent == nullptr)
-	{
-		return;
-	}
-    // Tell the client we beginning to send level rewards.
-    if(rewardingItem) GameMessages::NotifyLevelRewards(parent->GetObjectID(), parent->GetSystemAddress(), m_Level, rewardingItem);
-
-	for (auto* reward : rewards)
-	{
-		switch (reward->rewardType)
-		{
-		case 0:
-			inventoryComponent->AddItem(reward->value, reward->count, eLootSourceType::LOOT_SOURCE_LEVEL_REWARD);
-			break;
-		case 4:
-			{
-				auto* items = inventoryComponent->GetInventory(eInventoryType::ITEMS);
-				items->SetSize(items->GetSize() + reward->value);
-			}
-			break;
-		case 9:
-			controllablePhysicsComponent->SetSpeedMultiplier(static_cast<float>(reward->value) / 500.0f);
-			break;
-		case 11:
-		case 12:
-			break;
-		default:
-			break;
-		}
-    }
-    // Tell the client we have finished sending level rewards.
-    if(rewardingItem) GameMessages::NotifyLevelRewards(parent->GetObjectID(), parent->GetSystemAddress(), m_Level, !rewardingItem);
-}
-
-void CharacterComponent::SetGMLevel(int gmlevel) {
+void CharacterComponent::SetGMLevel(eGameMasterLevel gmlevel) {
 	m_DirtyGMInfo = true;
-	if (gmlevel > 0) m_IsGM = true;
+	if (gmlevel > eGameMasterLevel::CIVILIAN) m_IsGM = true;
 	else m_IsGM = false;
 	m_GMLevel = gmlevel;
 }
 
-void CharacterComponent::LoadFromXML() {
-    if (!m_Character) return;
-    
-    tinyxml2::XMLDocument* doc = m_Character->GetXMLDoc();
-    if (!doc) return;
-    
-	tinyxml2::XMLElement* character = doc->FirstChildElement("obj")->FirstChildElement("char");
+void CharacterComponent::LoadFromXml(const tinyxml2::XMLDocument& doc) {
+
+	auto* character = doc.FirstChildElement("obj")->FirstChildElement("char");
 	if (!character) {
-		Game::logger->Log("CharacterComponent", "Failed to find char tag while loading XML!\n");
+		LOG("Failed to find char tag while loading XML!");
 		return;
 	}
-    if (character->QueryAttribute("rpt", &m_Reputation) == tinyxml2::XML_NO_ATTRIBUTE) {
-        SetReputation(0);
-    }
-    
+	if (character->QueryAttribute("rpt", &m_Reputation) == tinyxml2::XML_NO_ATTRIBUTE) {
+		SetReputation(0);
+	}
+
+	character->QueryUnsigned64Attribute("co", &m_ClaimCodes[0]);
+	character->QueryUnsigned64Attribute("co1", &m_ClaimCodes[1]);
+	character->QueryUnsigned64Attribute("co2", &m_ClaimCodes[2]);
+	character->QueryUnsigned64Attribute("co3", &m_ClaimCodes[3]);
+
+	AwardClaimCodes();
+
 	character->QueryInt64Attribute("ls", &m_Uscore);
 
 	// Load the statistics
-    const auto* statisticsAttribute = character->FindAttribute("stt");
-    if (statisticsAttribute) {
-        InitializeStatisticsFromString(std::string(statisticsAttribute->Value()));
-    } else {
-        InitializeEmptyStatistics();
-    }
-
-    // Load the zone statistics
-    m_ZoneStatistics = {};
-    auto zoneStatistics = character->FirstChildElement("zs");
-
-    if (zoneStatistics) {
-        auto child = zoneStatistics->FirstChildElement();
-        while (child) {
-            ZoneStatistics statistics = {};
-
-            child->QueryUnsigned64Attribute("ac", &statistics.m_AchievementsCollected);
-            child->QueryUnsigned64Attribute("bc", &statistics.m_BricksCollected);
-            child->QueryUnsigned64Attribute("cc", &statistics.m_CoinsCollected);
-            child->QueryUnsigned64Attribute("es", &statistics.m_EnemiesSmashed);
-            child->QueryUnsigned64Attribute("qbc", &statistics.m_QuickBuildsCompleted);
-
-            uint32_t mapID;
-            child->QueryAttribute("map", &mapID);
-
-            m_ZoneStatistics.insert({ (LWOMAPID) mapID, statistics });
-
-            child = child->NextSiblingElement();
-        }
-    }
-
-	const tinyxml2::XMLAttribute *rocketConfig = character->FindAttribute("lcbp");
-	if (rocketConfig) {
-		m_LastRocketConfig = GeneralUtils::ASCIIToUTF16(std::string(rocketConfig->Value()));
+	const auto* statisticsAttribute = character->FindAttribute("stt");
+	if (statisticsAttribute) {
+		InitializeStatisticsFromString(std::string(statisticsAttribute->Value()));
+	} else {
+		InitializeEmptyStatistics();
 	}
-	else
-	{
+
+	// Load the zone statistics
+	m_ZoneStatistics = {};
+	auto zoneStatistics = character->FirstChildElement("zs");
+
+	if (zoneStatistics) {
+		auto child = zoneStatistics->FirstChildElement();
+		while (child) {
+			ZoneStatistics statistics = {};
+
+			child->QueryUnsigned64Attribute("ac", &statistics.m_AchievementsCollected);
+			child->QueryInt64Attribute("bc", &statistics.m_BricksCollected);
+			child->QueryUnsigned64Attribute("cc", &statistics.m_CoinsCollected);
+			child->QueryUnsigned64Attribute("es", &statistics.m_EnemiesSmashed);
+			child->QueryUnsigned64Attribute("qbc", &statistics.m_QuickBuildsCompleted);
+
+			uint32_t mapID;
+			child->QueryAttribute("map", &mapID);
+
+			m_ZoneStatistics.insert({ static_cast<LWOMAPID>(mapID), statistics });
+
+			child = child->NextSiblingElement();
+		}
+	}
+
+	const tinyxml2::XMLAttribute* rocketConfig = character->FindAttribute("lcbp");
+
+	if (rocketConfig) {
+		m_LastRocketConfig = GeneralUtils::ASCIIToUTF16(rocketConfig->Value());
+	} else {
 		m_LastRocketConfig = u"";
 	}
 
-    //
-    // Begin custom attributes
-    //
+	//
+	// Begin custom attributes
+	//
 
-    // Load the last rocket item ID
-    const tinyxml2::XMLAttribute *lastRocketItemID = character->FindAttribute("lrid");
-    if (lastRocketItemID) {
-        m_LastRocketItemID = lastRocketItemID->Int64Value();
-    }
+	// Load the last rocket item ID
+	const tinyxml2::XMLAttribute* lastRocketItemID = character->FindAttribute("lrid");
+	if (lastRocketItemID) {
+		m_LastRocketItemID = lastRocketItemID->Int64Value();
+	}
 
-    //
-    // End custom attributes
-    //
+	//
+	// End custom attributes
+	//
 
-	if (m_GMLevel > 0) {
+	if (m_GMLevel > eGameMasterLevel::CIVILIAN) {
 		m_IsGM = true;
 		m_DirtyGMInfo = true;
 		m_EditorLevel = m_GMLevel;
@@ -319,82 +268,90 @@ void CharacterComponent::LoadFromXML() {
 	}
 
 	//Annoying guild bs:
-	const tinyxml2::XMLAttribute *guildName = character->FindAttribute("gn");
+	const tinyxml2::XMLAttribute* guildName = character->FindAttribute("gn");
 	if (guildName) {
 		const char* gn = guildName->Value();
 		int64_t gid = 0;
 		character->QueryInt64Attribute("gid", &gid);
 		if (gid != 0) {
 			std::string guildname(gn);
-			m_GuildName = GeneralUtils::ASCIIToUTF16(guildname);
+			m_GuildName = GeneralUtils::UTF8ToUTF16(guildname);
 			m_GuildID = gid;
 			m_DirtySocialInfo = true;
 		}
 	}
 
-	tinyxml2::XMLElement* level = doc->FirstChildElement("obj")->FirstChildElement("lvl");
-	if (!level) {
-		Game::logger->Log("CharacterComponent", "Failed to find lvl tag while loading XML!\n");
-		return;
+	if (character->FindAttribute("time")) {
+		character->QueryUnsigned64Attribute("time", &m_TotalTimePlayed);
+	} else {
+		m_TotalTimePlayed = 0;
 	}
 
-	level->QueryAttribute("l", &m_Level);
+	if (!m_Character) return;
 
-	if (character->FindAttribute("time")) {
-	     character->QueryUnsigned64Attribute("time", &m_TotalTimePlayed);
-	} else {
-	    m_TotalTimePlayed = 0;
+	//Check to see if we're landing:
+	if (m_Character->GetZoneID() != Game::server->GetZoneID()) {
+		m_IsLanding = true;
+	}
+
+	if (LandingAnimDisabled(m_Character->GetZoneID()) || LandingAnimDisabled(Game::server->GetZoneID()) || m_LastRocketConfig.empty()) {
+		m_IsLanding = false; //Don't make us land on VE/minigames lol
 	}
 }
 
-void CharacterComponent::UpdateXml(tinyxml2::XMLDocument* doc) {
-    tinyxml2::XMLElement* minifig = doc->FirstChildElement("obj")->FirstChildElement("mf");
+void CharacterComponent::UpdateXml(tinyxml2::XMLDocument& doc) {
+	tinyxml2::XMLElement* minifig = doc.FirstChildElement("obj")->FirstChildElement("mf");
 	if (!minifig) {
-		Game::logger->Log("CharacterComponent", "Failed to find mf tag while updating XML!\n");
+		LOG("Failed to find mf tag while updating XML!");
 		return;
 	}
 
-    // write minifig information that might have been changed by commands 
+	// write minifig information that might have been changed by commands
 
-    minifig->SetAttribute("es", m_Character->GetEyebrows());
-    minifig->SetAttribute("ess", m_Character->GetEyes());
-    minifig->SetAttribute("hc", m_Character->GetHairColor());
-    minifig->SetAttribute("hs", m_Character->GetHairStyle());
-    minifig->SetAttribute("l", m_Character->GetPantsColor());
-    minifig->SetAttribute("lh", m_Character->GetLeftHand());
-    minifig->SetAttribute("ms", m_Character->GetMouth());
-    minifig->SetAttribute("rh", m_Character->GetRightHand());
-    minifig->SetAttribute("t", m_Character->GetShirtColor());
+	minifig->SetAttribute("es", m_Character->GetEyebrows());
+	minifig->SetAttribute("ess", m_Character->GetEyes());
+	minifig->SetAttribute("hc", m_Character->GetHairColor());
+	minifig->SetAttribute("hs", m_Character->GetHairStyle());
+	minifig->SetAttribute("l", m_Character->GetPantsColor());
+	minifig->SetAttribute("lh", m_Character->GetLeftHand());
+	minifig->SetAttribute("ms", m_Character->GetMouth());
+	minifig->SetAttribute("rh", m_Character->GetRightHand());
+	minifig->SetAttribute("t", m_Character->GetShirtColor());
 
-    // done with minifig
+	// done with minifig
 
-	tinyxml2::XMLElement* character = doc->FirstChildElement("obj")->FirstChildElement("char");
+	tinyxml2::XMLElement* character = doc.FirstChildElement("obj")->FirstChildElement("char");
 	if (!character) {
-		Game::logger->Log("CharacterComponent", "Failed to find char tag while updating XML!\n");
+		LOG("Failed to find char tag while updating XML!");
 		return;
 	}
+
+	if (m_ClaimCodes[0] != 0) character->SetAttribute("co", m_ClaimCodes[0]);
+	if (m_ClaimCodes[1] != 0) character->SetAttribute("co1", m_ClaimCodes[1]);
+	if (m_ClaimCodes[2] != 0) character->SetAttribute("co2", m_ClaimCodes[2]);
+	if (m_ClaimCodes[3] != 0) character->SetAttribute("co3", m_ClaimCodes[3]);
 
 	character->SetAttribute("ls", m_Uscore);
-    // Custom attribute to keep track of reputation.
-    character->SetAttribute("rpt", GetReputation());
+	// Custom attribute to keep track of reputation.
+	character->SetAttribute("rpt", GetReputation());
 	character->SetAttribute("stt", StatisticsToString().c_str());
 
 	// Set the zone statistics of the form <zs><s/> ... <s/></zs>
 	auto zoneStatistics = character->FirstChildElement("zs");
-	if (!zoneStatistics) zoneStatistics = doc->NewElement("zs");
+	if (!zoneStatistics) zoneStatistics = doc.NewElement("zs");
 	zoneStatistics->DeleteChildren();
 
 	for (auto pair : m_ZoneStatistics) {
-	    auto zoneStatistic = doc->NewElement("s");
+		auto zoneStatistic = doc.NewElement("s");
 
-	    zoneStatistic->SetAttribute("map", pair.first);
-	    zoneStatistic->SetAttribute("ac", pair.second.m_AchievementsCollected);
-	    zoneStatistic->SetAttribute("bc", pair.second.m_BricksCollected);
-	    zoneStatistic->SetAttribute("cc", pair.second.m_CoinsCollected);
-	    zoneStatistic->SetAttribute("es", pair.second.m_EnemiesSmashed);
-	    zoneStatistic->SetAttribute("qbc", pair.second.m_QuickBuildsCompleted);
+		zoneStatistic->SetAttribute("map", pair.first);
+		zoneStatistic->SetAttribute("ac", pair.second.m_AchievementsCollected);
+		zoneStatistic->SetAttribute("bc", pair.second.m_BricksCollected);
+		zoneStatistic->SetAttribute("cc", pair.second.m_CoinsCollected);
+		zoneStatistic->SetAttribute("es", pair.second.m_EnemiesSmashed);
+		zoneStatistic->SetAttribute("qbc", pair.second.m_QuickBuildsCompleted);
 
-	    zoneStatistics->LinkEndChild(zoneStatistic);
+		zoneStatistics->LinkEndChild(zoneStatistic);
 	}
 
 	character->LinkEndChild(zoneStatistics);
@@ -402,33 +359,23 @@ void CharacterComponent::UpdateXml(tinyxml2::XMLDocument* doc) {
 	if (!m_LastRocketConfig.empty()) {
 		std::string config = GeneralUtils::UTF16ToWTF8(m_LastRocketConfig);
 		character->SetAttribute("lcbp", config.c_str());
-	}
-	else
-	{
+	} else {
 		character->DeleteAttribute("lcbp");
 	}
 
-    //
-    // Begin custom attributes
-    //
+	//
+	// Begin custom attributes
+	//
 
-    // Store last rocket item ID
-    character->SetAttribute("lrid", m_LastRocketItemID);
+	// Store last rocket item ID
+	character->SetAttribute("lrid", m_LastRocketItemID);
 
-    //
-    // End custom attributes
-    //
-
-	tinyxml2::XMLElement* level = doc->FirstChildElement("obj")->FirstChildElement("lvl");
-	if (!level) {
-		Game::logger->Log("CharacterComponent", "Failed to find lvl tag while updating XML!\n");
-		return;
-	}
-
-	level->SetAttribute("l", m_Level);
+	//
+	// End custom attributes
+	//
 
 	auto newUpdateTimestamp = std::time(nullptr);
-	Game::logger->Log("TotalTimePlayed", "Time since last save: %d\n", newUpdateTimestamp - m_LastUpdateTimestamp);
+	LOG("Time since last save: %d", newUpdateTimestamp - m_LastUpdateTimestamp);
 
 	m_TotalTimePlayed += newUpdateTimestamp - m_LastUpdateTimestamp;
 	character->SetAttribute("time", m_TotalTimePlayed);
@@ -449,7 +396,7 @@ Item* CharacterComponent::GetRocket(Entity* player) {
 	if (!inventoryComponent) return rocket;
 
 	// Select the rocket
-	if (!rocket){
+	if (!rocket) {
 		rocket = inventoryComponent->FindItemById(GetLastRocketItemID());
 	}
 
@@ -458,7 +405,7 @@ Item* CharacterComponent::GetRocket(Entity* player) {
 	}
 
 	if (!rocket) {
-		Game::logger->Log("CharacterComponent", "Unable to find rocket to equip!\n");
+		LOG("Unable to find rocket to equip!");
 		return rocket;
 	}
 	return rocket;
@@ -492,325 +439,399 @@ void CharacterComponent::RocketUnEquip(Entity* player) {
 }
 
 void CharacterComponent::TrackMissionCompletion(bool isAchievement) {
-    UpdatePlayerStatistic(MissionsCompleted);
+	UpdatePlayerStatistic(MissionsCompleted);
 
-    // Achievements are tracked separately for the zone
-    if (isAchievement) {
-        const auto mapID = dZoneManager::Instance()->GetZoneID().GetMapID();
-        GetZoneStatisticsForMap(mapID).m_AchievementsCollected++;
-    }
+	// Achievements are tracked separately for the zone
+	if (isAchievement) {
+		const auto mapID = Game::zoneManager->GetZoneID().GetMapID();
+		GetZoneStatisticsForMap(mapID).m_AchievementsCollected++;
+	}
 }
 
 void CharacterComponent::TrackLOTCollection(LOT lot) {
-    switch (lot) {
-        // Handle all the imagination powerup lots
-        case 935:   // 1 point
-        case 4035:  // 2 points
-        case 11910: // 3 points
-        case 11911: // 5 points
-        case 11918: // 10 points
-            UpdatePlayerStatistic(ImaginationPowerUpsCollected);
-            break;
-        // Handle all the armor powerup lots
-        case 6431:  // 1 point
-        case 11912: // 2 points
-        case 11913: // 3 points
-        case 11914: // 5 points
-        case 11919: // 10 points
-            UpdatePlayerStatistic(ArmorPowerUpsCollected);
-            break;
-        // Handle all the life powerup lots
-        case 177:   // 1 point
-        case 11915: // 2 points
-        case 11916: // 3 points
-        case 11917: // 5 points
-        case 11920: // 10 points
-            UpdatePlayerStatistic(LifePowerUpsCollected);
-            break;
-        default:
-            break;
-    }
+	switch (lot) {
+		// Handle all the imagination powerup lots
+	case 935:   // 1 point
+	case 4035:  // 2 points
+	case 11910: // 3 points
+	case 11911: // 5 points
+	case 11918: // 10 points
+		UpdatePlayerStatistic(ImaginationPowerUpsCollected);
+		break;
+		// Handle all the armor powerup lots
+	case 6431:  // 1 point
+	case 11912: // 2 points
+	case 11913: // 3 points
+	case 11914: // 5 points
+	case 11919: // 10 points
+		UpdatePlayerStatistic(ArmorPowerUpsCollected);
+		break;
+		// Handle all the life powerup lots
+	case 177:   // 1 point
+	case 11915: // 2 points
+	case 11916: // 3 points
+	case 11917: // 5 points
+	case 11920: // 10 points
+		UpdatePlayerStatistic(LifePowerUpsCollected);
+		break;
+	default:
+		break;
+	}
 }
 
 void CharacterComponent::TrackHealthDelta(int32_t health) {
-    if (health > 0) {
-        UpdatePlayerStatistic(TotalDamageHealed, health);
-    } else {
-        UpdatePlayerStatistic(TotalDamageTaken, -health);
-    }
+	if (health > 0) {
+		UpdatePlayerStatistic(TotalDamageHealed, health);
+	} else {
+		UpdatePlayerStatistic(TotalDamageTaken, -health);
+	}
 }
 
 void CharacterComponent::TrackImaginationDelta(int32_t imagination) {
-    if (imagination > 0) {
-        UpdatePlayerStatistic(TotalImaginationRestored, imagination);
-    } else {
-        UpdatePlayerStatistic(TotalImaginationUsed, -imagination);
-    }
+	if (imagination > 0) {
+		UpdatePlayerStatistic(TotalImaginationRestored, imagination);
+	} else {
+		UpdatePlayerStatistic(TotalImaginationUsed, -imagination);
+	}
 }
 
 void CharacterComponent::TrackArmorDelta(int32_t armor) {
-    if (armor > 0) {
-        UpdatePlayerStatistic(TotalArmorRepaired, armor);
-    }
+	if (armor > 0) {
+		UpdatePlayerStatistic(TotalArmorRepaired, armor);
+	}
 }
 
-void CharacterComponent::TrackRebuildComplete() {
-    UpdatePlayerStatistic(QuickBuildsCompleted);
+void CharacterComponent::TrackQuickBuildComplete() {
+	UpdatePlayerStatistic(QuickBuildsCompleted);
 
-    const auto mapID = dZoneManager::Instance()->GetZoneID().GetMapID();
-    GetZoneStatisticsForMap(mapID).m_QuickBuildsCompleted++;
+	const auto mapID = Game::zoneManager->GetZoneID().GetMapID();
+	GetZoneStatisticsForMap(mapID).m_QuickBuildsCompleted++;
 }
 
 void CharacterComponent::TrackRaceCompleted(bool won) {
-    m_RacesFinished++;
-    if (won)
-        m_FirstPlaceRaceFinishes++;
+	m_RacesFinished++;
+	if (won)
+		m_FirstPlaceRaceFinishes++;
 }
 
 void CharacterComponent::TrackPositionUpdate(const NiPoint3& newPosition) {
-    const auto distance = NiPoint3::Distance(newPosition, m_Parent->GetPosition());
+	const auto distance = NiPoint3::Distance(newPosition, m_Parent->GetPosition());
 
-    if (m_IsRacing) {
-        UpdatePlayerStatistic(DistanceDriven, (uint64_t) distance);
-    } else {
-        UpdatePlayerStatistic(MetersTraveled, (uint64_t) distance);
-    }
+	if (m_IsRacing) {
+		UpdatePlayerStatistic(DistanceDriven, static_cast<uint64_t>(distance));
+	} else {
+		UpdatePlayerStatistic(MetersTraveled, static_cast<uint64_t>(distance));
+	}
 }
 
-void CharacterComponent::HandleZoneStatisticsUpdate(LWOMAPID zoneID, const std::u16string &name, int32_t value) {
-    auto zoneStatistics = &GetZoneStatisticsForMap(zoneID);
+void CharacterComponent::HandleZoneStatisticsUpdate(LWOMAPID zoneID, const std::u16string& name, int32_t value) {
+	auto zoneStatistics = &GetZoneStatisticsForMap(zoneID);
 
-    if (name == u"BricksCollected") {
-        m_BricksCollected += value;
-        zoneStatistics->m_BricksCollected += value;
-    } else if (name == u"CoinsCollected") {
-        m_CurrencyCollected += value;
-        zoneStatistics->m_CoinsCollected += value;
-    } else if (name == u"EnemiesSmashed") {
-        m_EnemiesSmashed += value;
-        zoneStatistics->m_EnemiesSmashed += value;
-    }
+	if (name == u"BricksCollected") {
+		m_BricksCollected += value;
+		zoneStatistics->m_BricksCollected += value;
+	} else if (name == u"CoinsCollected") {
+		m_CurrencyCollected += value;
+		zoneStatistics->m_CoinsCollected += value;
+	} else if (name == u"EnemiesSmashed") {
+		m_EnemiesSmashed += value;
+		zoneStatistics->m_EnemiesSmashed += value;
+	}
 }
 
 void CharacterComponent::UpdatePlayerStatistic(StatisticID updateID, uint64_t updateValue) {
-    switch (updateID) {
-        case CurrencyCollected:
-            m_CurrencyCollected += updateValue;
-            break;
-        case BricksCollected:
-            m_BricksCollected += updateValue;
-            break;
-        case SmashablesSmashed:
-            m_SmashablesSmashed += updateValue;
-            break;
-        case QuickBuildsCompleted:
-            m_QuickBuildsCompleted += updateValue;
-            break;
-        case EnemiesSmashed:
-            m_EnemiesSmashed += updateValue;
-            break;
-        case RocketsUsed:
-            m_RocketsUsed += updateValue;
-            break;
-        case MissionsCompleted:
-            m_MissionsCompleted += updateValue;
-            break;
-        case PetsTamed:
-            m_PetsTamed += updateValue;
-            break;
-        case ImaginationPowerUpsCollected:
-            m_ImaginationPowerUpsCollected += updateValue;
-            break;
-        case LifePowerUpsCollected:
-            m_LifePowerUpsCollected += updateValue;
-            break;
-        case ArmorPowerUpsCollected:
-            m_ArmorPowerUpsCollected += updateValue;
-            break;
-        case MetersTraveled:
-            m_MetersTraveled += updateValue;
-            break;
-        case TimesSmashed:
-            m_TimesSmashed += updateValue;
-            break;
-        case TotalDamageTaken:
-            m_TotalDamageTaken += updateValue;
-            break;
-        case TotalDamageHealed:
-            m_TotalDamageHealed += updateValue;
-            break;
-        case TotalArmorRepaired:
-            m_TotalArmorRepaired += updateValue;
-            break;
-        case TotalImaginationRestored:
-            m_TotalImaginationRestored += updateValue;
-            break;
-        case TotalImaginationUsed:
-            m_TotalImaginationUsed += updateValue;
-            break;
-        case DistanceDriven:
-            m_DistanceDriven += updateValue;
-            break;
-        case TimeAirborneInCar:
-            m_TimeAirborneInCar += updateValue;
-            break;
-        case RacingImaginationPowerUpsCollected:
-            m_RacingImaginationPowerUpsCollected += updateValue;
-            break;
-        case RacingImaginationCratesSmashed:
-            m_RacingImaginationCratesSmashed += updateValue;
-            break;
-        case RacingCarBoostsActivated:
-            m_RacingCarBoostsActivated += updateValue;
-            break;
-        case RacingTimesWrecked:
-            m_RacingTimesWrecked += updateValue;
-            break;
-        case RacingSmashablesSmashed:
-            m_RacingSmashablesSmashed += updateValue;
-            break;
-        case RacesFinished:
-            m_RacesFinished += updateValue;
-            break;
-        case FirstPlaceRaceFinishes:
-            m_FirstPlaceRaceFinishes += updateValue;
-            break;
-        default:
-            break;
-    }
+	switch (updateID) {
+	case CurrencyCollected:
+		m_CurrencyCollected += updateValue;
+		break;
+	case BricksCollected:
+		m_BricksCollected += updateValue;
+		break;
+	case SmashablesSmashed:
+		m_SmashablesSmashed += updateValue;
+		break;
+	case QuickBuildsCompleted:
+		m_QuickBuildsCompleted += updateValue;
+		break;
+	case EnemiesSmashed:
+		m_EnemiesSmashed += updateValue;
+		break;
+	case RocketsUsed:
+		m_RocketsUsed += updateValue;
+		break;
+	case MissionsCompleted:
+		m_MissionsCompleted += updateValue;
+		break;
+	case PetsTamed:
+		m_PetsTamed += updateValue;
+		break;
+	case ImaginationPowerUpsCollected:
+		m_ImaginationPowerUpsCollected += updateValue;
+		break;
+	case LifePowerUpsCollected:
+		m_LifePowerUpsCollected += updateValue;
+		break;
+	case ArmorPowerUpsCollected:
+		m_ArmorPowerUpsCollected += updateValue;
+		break;
+	case MetersTraveled:
+		m_MetersTraveled += updateValue;
+		break;
+	case TimesSmashed:
+		m_TimesSmashed += updateValue;
+		break;
+	case TotalDamageTaken:
+		m_TotalDamageTaken += updateValue;
+		break;
+	case TotalDamageHealed:
+		m_TotalDamageHealed += updateValue;
+		break;
+	case TotalArmorRepaired:
+		m_TotalArmorRepaired += updateValue;
+		break;
+	case TotalImaginationRestored:
+		m_TotalImaginationRestored += updateValue;
+		break;
+	case TotalImaginationUsed:
+		m_TotalImaginationUsed += updateValue;
+		break;
+	case DistanceDriven:
+		m_DistanceDriven += updateValue;
+		break;
+	case TimeAirborneInCar:
+		m_TimeAirborneInCar += updateValue;
+		break;
+	case RacingImaginationPowerUpsCollected:
+		m_RacingImaginationPowerUpsCollected += updateValue;
+		break;
+	case RacingImaginationCratesSmashed:
+		m_RacingImaginationCratesSmashed += updateValue;
+		break;
+	case RacingCarBoostsActivated:
+		m_RacingCarBoostsActivated += updateValue;
+		break;
+	case RacingTimesWrecked:
+		m_RacingTimesWrecked += updateValue;
+		break;
+	case RacingSmashablesSmashed:
+		m_RacingSmashablesSmashed += updateValue;
+		break;
+	case RacesFinished:
+		m_RacesFinished += updateValue;
+		break;
+	case FirstPlaceRaceFinishes:
+		m_FirstPlaceRaceFinishes += updateValue;
+		break;
+	default:
+		break;
+	}
 }
 
-void CharacterComponent::InitializeStatisticsFromString(const std::string &statisticsString) {
-    auto split = GeneralUtils::SplitString(statisticsString, ';');
+void CharacterComponent::InitializeStatisticsFromString(const std::string& statisticsString) {
+	auto split = GeneralUtils::SplitString(statisticsString, ';');
 
-    m_CurrencyCollected = GetStatisticFromSplit(split, 0);
-    m_BricksCollected = GetStatisticFromSplit(split, 1);
-    m_SmashablesSmashed = GetStatisticFromSplit(split, 2);
-    m_QuickBuildsCompleted = GetStatisticFromSplit(split, 3);
-    m_EnemiesSmashed = GetStatisticFromSplit(split, 4);
-    m_RocketsUsed = GetStatisticFromSplit(split, 5);
-    m_MissionsCompleted = GetStatisticFromSplit(split, 6);
-    m_PetsTamed = GetStatisticFromSplit(split, 7);
-    m_ImaginationPowerUpsCollected = GetStatisticFromSplit(split, 8);
-    m_LifePowerUpsCollected = GetStatisticFromSplit(split, 9);
-    m_ArmorPowerUpsCollected = GetStatisticFromSplit(split, 10);
-    m_MetersTraveled = GetStatisticFromSplit(split, 11);
-    m_TimesSmashed = GetStatisticFromSplit(split, 12);
-    m_TotalDamageTaken = GetStatisticFromSplit(split, 13);
-    m_TotalDamageHealed = GetStatisticFromSplit(split, 14);
-    m_TotalArmorRepaired = GetStatisticFromSplit(split, 15);
-    m_TotalImaginationRestored = GetStatisticFromSplit(split, 16);
-    m_TotalImaginationUsed = GetStatisticFromSplit(split, 17);
-    m_DistanceDriven = GetStatisticFromSplit(split, 18);
-    m_TimeAirborneInCar = GetStatisticFromSplit(split, 19); // WONTFIX
-    m_RacingImaginationPowerUpsCollected = GetStatisticFromSplit(split, 20);
-    m_RacingImaginationCratesSmashed = GetStatisticFromSplit(split, 21);
-    m_RacingCarBoostsActivated = GetStatisticFromSplit(split, 22);
-    m_RacingTimesWrecked = GetStatisticFromSplit(split, 23);
-    m_RacingSmashablesSmashed = GetStatisticFromSplit(split, 24);
-    m_RacesFinished = GetStatisticFromSplit(split, 25);
-    m_FirstPlaceRaceFinishes = GetStatisticFromSplit(split, 26);
+	m_CurrencyCollected = GetStatisticFromSplit(split, 0);
+	m_BricksCollected = GetStatisticFromSplit(split, 1);
+	m_SmashablesSmashed = GetStatisticFromSplit(split, 2);
+	m_QuickBuildsCompleted = GetStatisticFromSplit(split, 3);
+	m_EnemiesSmashed = GetStatisticFromSplit(split, 4);
+	m_RocketsUsed = GetStatisticFromSplit(split, 5);
+	m_MissionsCompleted = GetStatisticFromSplit(split, 6);
+	m_PetsTamed = GetStatisticFromSplit(split, 7);
+	m_ImaginationPowerUpsCollected = GetStatisticFromSplit(split, 8);
+	m_LifePowerUpsCollected = GetStatisticFromSplit(split, 9);
+	m_ArmorPowerUpsCollected = GetStatisticFromSplit(split, 10);
+	m_MetersTraveled = GetStatisticFromSplit(split, 11);
+	m_TimesSmashed = GetStatisticFromSplit(split, 12);
+	m_TotalDamageTaken = GetStatisticFromSplit(split, 13);
+	m_TotalDamageHealed = GetStatisticFromSplit(split, 14);
+	m_TotalArmorRepaired = GetStatisticFromSplit(split, 15);
+	m_TotalImaginationRestored = GetStatisticFromSplit(split, 16);
+	m_TotalImaginationUsed = GetStatisticFromSplit(split, 17);
+	m_DistanceDriven = GetStatisticFromSplit(split, 18);
+	m_TimeAirborneInCar = GetStatisticFromSplit(split, 19); // WONTFIX
+	m_RacingImaginationPowerUpsCollected = GetStatisticFromSplit(split, 20);
+	m_RacingImaginationCratesSmashed = GetStatisticFromSplit(split, 21);
+	m_RacingCarBoostsActivated = GetStatisticFromSplit(split, 22);
+	m_RacingTimesWrecked = GetStatisticFromSplit(split, 23);
+	m_RacingSmashablesSmashed = GetStatisticFromSplit(split, 24);
+	m_RacesFinished = GetStatisticFromSplit(split, 25);
+	m_FirstPlaceRaceFinishes = GetStatisticFromSplit(split, 26);
 }
 
 void CharacterComponent::InitializeEmptyStatistics() {
-    m_CurrencyCollected = 0;
-    m_BricksCollected = 0;
-    m_SmashablesSmashed = 0;
-    m_QuickBuildsCompleted = 0;
-    m_EnemiesSmashed = 0;
-    m_RocketsUsed = 0;
-    m_MissionsCompleted = 0;
-    m_PetsTamed = 0;
-    m_ImaginationPowerUpsCollected = 0;
-    m_LifePowerUpsCollected = 0;
-    m_ArmorPowerUpsCollected = 0;
-    m_MetersTraveled = 0;
-    m_TimesSmashed = 0;
-    m_TotalDamageTaken = 0;
-    m_TotalDamageHealed = 0;
-    m_TotalArmorRepaired = 0;
-    m_TotalImaginationRestored = 0;
-    m_TotalImaginationUsed = 0;
-    m_DistanceDriven = 0;
-    m_TimeAirborneInCar = 0;
-    m_RacingImaginationPowerUpsCollected = 0;
-    m_RacingImaginationCratesSmashed = 0;
-    m_RacingCarBoostsActivated = 0;
-    m_RacingTimesWrecked = 0;
-    m_RacingSmashablesSmashed = 0;
-    m_RacesFinished = 0;
-    m_FirstPlaceRaceFinishes = 0;
+	m_CurrencyCollected = 0;
+	m_BricksCollected = 0;
+	m_SmashablesSmashed = 0;
+	m_QuickBuildsCompleted = 0;
+	m_EnemiesSmashed = 0;
+	m_RocketsUsed = 0;
+	m_MissionsCompleted = 0;
+	m_PetsTamed = 0;
+	m_ImaginationPowerUpsCollected = 0;
+	m_LifePowerUpsCollected = 0;
+	m_ArmorPowerUpsCollected = 0;
+	m_MetersTraveled = 0;
+	m_TimesSmashed = 0;
+	m_TotalDamageTaken = 0;
+	m_TotalDamageHealed = 0;
+	m_TotalArmorRepaired = 0;
+	m_TotalImaginationRestored = 0;
+	m_TotalImaginationUsed = 0;
+	m_DistanceDriven = 0;
+	m_TimeAirborneInCar = 0;
+	m_RacingImaginationPowerUpsCollected = 0;
+	m_RacingImaginationCratesSmashed = 0;
+	m_RacingCarBoostsActivated = 0;
+	m_RacingTimesWrecked = 0;
+	m_RacingSmashablesSmashed = 0;
+	m_RacesFinished = 0;
+	m_FirstPlaceRaceFinishes = 0;
 }
 
 std::string CharacterComponent::StatisticsToString() const {
-    std::stringstream result;
-    result << std::to_string(m_CurrencyCollected) << ';'
-        << std::to_string(m_BricksCollected) << ';'
-        << std::to_string(m_SmashablesSmashed) << ';'
-        << std::to_string(m_QuickBuildsCompleted) << ';'
-        << std::to_string(m_EnemiesSmashed) << ';'
-        << std::to_string(m_RocketsUsed) << ';'
-        << std::to_string(m_MissionsCompleted) << ';'
-        << std::to_string(m_PetsTamed) << ';'
-        << std::to_string(m_ImaginationPowerUpsCollected) << ';'
-        << std::to_string(m_LifePowerUpsCollected) << ';'
-        << std::to_string(m_ArmorPowerUpsCollected) << ';'
-        << std::to_string(m_MetersTraveled) << ';'
-        << std::to_string(m_TimesSmashed) << ';'
-        << std::to_string(m_TotalDamageTaken) << ';'
-        << std::to_string(m_TotalDamageHealed) << ';'
-        << std::to_string(m_TotalArmorRepaired) << ';'
-        << std::to_string(m_TotalImaginationRestored) << ';'
-        << std::to_string(m_TotalImaginationUsed) << ';'
-        << std::to_string(m_DistanceDriven) << ';'
-        << std::to_string(m_TimeAirborneInCar) << ';'
-        << std::to_string(m_RacingImaginationPowerUpsCollected) << ';'
-        << std::to_string(m_RacingImaginationCratesSmashed) << ';'
-        << std::to_string(m_RacingCarBoostsActivated) << ';'
-        << std::to_string(m_RacingTimesWrecked) << ';'
-        << std::to_string(m_RacingSmashablesSmashed) << ';'
-        << std::to_string(m_RacesFinished) << ';'
-        << std::to_string(m_FirstPlaceRaceFinishes) << ';';
+	std::stringstream result;
+	result << std::to_string(m_CurrencyCollected) << ';'
+		<< std::to_string(m_BricksCollected) << ';'
+		<< std::to_string(m_SmashablesSmashed) << ';'
+		<< std::to_string(m_QuickBuildsCompleted) << ';'
+		<< std::to_string(m_EnemiesSmashed) << ';'
+		<< std::to_string(m_RocketsUsed) << ';'
+		<< std::to_string(m_MissionsCompleted) << ';'
+		<< std::to_string(m_PetsTamed) << ';'
+		<< std::to_string(m_ImaginationPowerUpsCollected) << ';'
+		<< std::to_string(m_LifePowerUpsCollected) << ';'
+		<< std::to_string(m_ArmorPowerUpsCollected) << ';'
+		<< std::to_string(m_MetersTraveled) << ';'
+		<< std::to_string(m_TimesSmashed) << ';'
+		<< std::to_string(m_TotalDamageTaken) << ';'
+		<< std::to_string(m_TotalDamageHealed) << ';'
+		<< std::to_string(m_TotalArmorRepaired) << ';'
+		<< std::to_string(m_TotalImaginationRestored) << ';'
+		<< std::to_string(m_TotalImaginationUsed) << ';'
+		<< std::to_string(m_DistanceDriven) << ';'
+		<< std::to_string(m_TimeAirborneInCar) << ';'
+		<< std::to_string(m_RacingImaginationPowerUpsCollected) << ';'
+		<< std::to_string(m_RacingImaginationCratesSmashed) << ';'
+		<< std::to_string(m_RacingCarBoostsActivated) << ';'
+		<< std::to_string(m_RacingTimesWrecked) << ';'
+		<< std::to_string(m_RacingSmashablesSmashed) << ';'
+		<< std::to_string(m_RacesFinished) << ';'
+		<< std::to_string(m_FirstPlaceRaceFinishes) << ';';
 
-    return result.str();
+	return result.str();
 }
 
 uint64_t CharacterComponent::GetStatisticFromSplit(std::vector<std::string> split, uint32_t index) {
-    return split.size() > index ? std::stoul(split.at(index)) : 0;
+	return split.size() > index ? std::stoull(split.at(index)) : 0;
 }
 
 ZoneStatistics& CharacterComponent::GetZoneStatisticsForMap(LWOMAPID mapID) {
-    auto stats = m_ZoneStatistics.find(mapID);
-    if (stats == m_ZoneStatistics.end())
-        m_ZoneStatistics.insert({ mapID, {0, 0, 0, 0, 0 } });
-    return m_ZoneStatistics.at(mapID);
+	auto stats = m_ZoneStatistics.find(mapID);
+	if (stats == m_ZoneStatistics.end())
+		m_ZoneStatistics.insert({ mapID, {0, 0, 0, 0, 0 } });
+	return m_ZoneStatistics.at(mapID);
 }
 
 void CharacterComponent::AddVentureVisionEffect(std::string ventureVisionType) {
-    const auto ventureVisionTypeIterator = m_ActiveVentureVisionEffects.find(ventureVisionType);
+	const auto ventureVisionTypeIterator = m_ActiveVentureVisionEffects.find(ventureVisionType);
 
-    if (ventureVisionTypeIterator != m_ActiveVentureVisionEffects.end()) {
-        ventureVisionTypeIterator->second = ++ventureVisionTypeIterator->second;
-    } else {
-        // If the effect it not found, insert it into the active effects.
-        m_ActiveVentureVisionEffects.insert(std::make_pair(ventureVisionType, 1U));
-    }
+	if (ventureVisionTypeIterator != m_ActiveVentureVisionEffects.end()) {
+		ventureVisionTypeIterator->second = ++ventureVisionTypeIterator->second;
+	} else {
+		// If the effect it not found, insert it into the active effects.
+		m_ActiveVentureVisionEffects.insert(std::make_pair(ventureVisionType, 1U));
+	}
 
-    UpdateClientMinimap(true, ventureVisionType);
+	UpdateClientMinimap(true, ventureVisionType);
 }
 
 void CharacterComponent::RemoveVentureVisionEffect(std::string ventureVisionType) {
-    const auto ventureVisionTypeIterator = m_ActiveVentureVisionEffects.find(ventureVisionType);
+	const auto ventureVisionTypeIterator = m_ActiveVentureVisionEffects.find(ventureVisionType);
 
-    if (ventureVisionTypeIterator != m_ActiveVentureVisionEffects.end()) {
-        ventureVisionTypeIterator->second = --ventureVisionTypeIterator->second;
-        UpdateClientMinimap(ventureVisionTypeIterator->second != 0U, ventureVisionType);
-    }
+	if (ventureVisionTypeIterator != m_ActiveVentureVisionEffects.end()) {
+		ventureVisionTypeIterator->second = --ventureVisionTypeIterator->second;
+		UpdateClientMinimap(ventureVisionTypeIterator->second != 0U, ventureVisionType);
+	}
 }
 
 void CharacterComponent::UpdateClientMinimap(bool showFaction, std::string ventureVisionType) const {
-    if (!m_Parent) return;
-    AMFArrayValue arrayToSend;
-    arrayToSend.InsertValue(ventureVisionType, showFaction ? static_cast<AMFValue*>(new AMFTrueValue()) : static_cast<AMFValue*>(new AMFFalseValue()));
-    GameMessages::SendUIMessageServerToSingleClient(m_Parent, m_Parent ? m_Parent->GetSystemAddress() : UNASSIGNED_SYSTEM_ADDRESS, "SetFactionVisibility", &arrayToSend);
+	if (!m_Parent) return;
+	AMFArrayValue arrayToSend;
+	arrayToSend.Insert(ventureVisionType, showFaction);
+	GameMessages::SendUIMessageServerToSingleClient(m_Parent, m_Parent ? m_Parent->GetSystemAddress() : UNASSIGNED_SYSTEM_ADDRESS, "SetFactionVisibility", arrayToSend);
+}
+
+void CharacterComponent::AwardClaimCodes() {
+	if (!m_Parent || !m_Parent->GetCharacter()) return;
+	auto* user = m_Parent->GetCharacter()->GetParentUser();
+	if (!user) return;
+
+	auto rewardCodes = Database::Get()->GetRewardCodesByAccountID(user->GetAccountID());
+	if (rewardCodes.empty()) return;
+
+	auto* cdrewardCodes = CDClientManager::GetTable<CDRewardCodesTable>();
+	for (auto const rewardCode : rewardCodes) {
+		LOG_DEBUG("Processing RewardCode %i", rewardCode);
+		const uint32_t rewardCodeIndex = rewardCode >> 6;
+		const uint32_t bitIndex = rewardCode % 64;
+		if (GeneralUtils::CheckBit(m_ClaimCodes[rewardCodeIndex], bitIndex)) continue;
+		m_ClaimCodes[rewardCodeIndex] = GeneralUtils::SetBit(m_ClaimCodes[rewardCodeIndex], bitIndex);
+
+		// Don't send it on this one since it's default and the mail doesn't make sense
+		if (rewardCode == 30) continue;
+
+		auto attachmentLOT = cdrewardCodes->GetAttachmentLOT(rewardCode);
+		std::ostringstream subject;
+		subject << "%[RewardCodes_" << rewardCode << "_subjectText]";
+		std::ostringstream body;
+		body << "%[RewardCodes_" << rewardCode << "_bodyText]";
+		Mail::SendMail(LWOOBJID_EMPTY, "%[MAIL_SYSTEM_NOTIFICATION]", m_Parent, subject.str(), body.str(), attachmentLOT, 1);
+	}
+}
+
+void CharacterComponent::SendToZone(LWOMAPID zoneId, LWOCLONEID cloneId) const {
+	const auto objid = m_Parent->GetObjectID();
+
+	ZoneInstanceManager::Instance()->RequestZoneTransfer(Game::server, zoneId, cloneId, false, [objid](bool mythranShift, uint32_t zoneID, uint32_t zoneInstance, uint32_t zoneClone, std::string serverIP, uint16_t serverPort) {
+		auto* entity = Game::entityManager->GetEntity(objid);
+
+		if (!entity) return;
+
+		const auto sysAddr = entity->GetSystemAddress();
+
+		auto* character = entity->GetCharacter();
+		auto* characterComponent = entity->GetComponent<CharacterComponent>();
+
+		if (character && characterComponent) {
+			character->SetZoneID(zoneID);
+			character->SetZoneInstance(zoneInstance);
+			character->SetZoneClone(zoneClone);
+
+			characterComponent->SetLastRocketConfig(u"");
+
+			character->SaveXMLToDatabase();
+		}
+
+		WorldPackets::SendTransferToWorld(sysAddr, serverIP, serverPort, mythranShift);
+
+		Game::entityManager->DestructEntity(entity);
+		});
+}
+
+const SystemAddress& CharacterComponent::GetSystemAddress() const {
+	return m_SystemAddress;
+}
+
+void CharacterComponent::SetRespawnPos(const NiPoint3& position) {
+	if (!m_Character) return;
+
+	m_respawnPos = position;
+
+	m_Character->SetRespawnPoint(Game::zoneManager->GetZone()->GetWorldID(), position);
+
+}
+
+void CharacterComponent::SetRespawnRot(const NiQuaternion& rotation) {
+	m_respawnRot = rotation;
 }

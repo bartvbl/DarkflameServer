@@ -1,25 +1,20 @@
-# create the testing file and list of tests
-create_test_sourcelist (Tests
-   CommonCxxTests.cpp
-   TestNiPoint3.cpp
-   TestLDFFormat.cpp
-)
- 
-# add the executable
-add_executable (CommonCxxTests ${Tests})
-target_link_libraries(CommonCxxTests dCommon raknet)
+message (STATUS "Testing is enabled.")
+enable_testing()
 
-if(WIN32)
-	target_link_libraries(CommonCxxTests ws2_32)
-endif(WIN32)
+find_package(GoogleTest REQUIRED)
+include(GoogleTest)
 
-# remove the test driver source file
-set (TestsToRun ${Tests})
-remove (TestsToRun CommonCxxTests.cpp)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
 
-# Add all the ADD_TEST for each test
-foreach (test ${TestsToRun})
-   get_filename_component (TName ${test} NAME_WE)
-   add_test (NAME ${TName} COMMAND CommonCxxTests ${TName})
-   set_property(TEST ${TName} PROPERTY ENVIRONMENT CTEST_OUTPUT_ON_FAILURE=1)
-endforeach ()
+if(APPLE)
+	set(CMAKE_INSTALL_RPATH_USE_LINK_PATH True)
+	set(CMAKE_BUILD_WITH_INSTALL_RPATH True)
+	set(CMAKE_INSTALL_RPATH "@executable_path")
+endif()
+
+add_custom_target(conncpp_tests
+	${CMAKE_COMMAND} -E copy $<TARGET_FILE:MariaDB::ConnCpp> ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+
+# Add the subdirectories
+add_subdirectory(dCommonTests)
+add_subdirectory(dGameTests)

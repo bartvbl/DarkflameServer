@@ -4,65 +4,77 @@
 #include <functional>
 #include <typeinfo>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
-#include "../thirdparty/raknet/Source/Replica.h"
-#include "../thirdparty/raknet/Source/ReplicaManager.h"
-
-#include "dCommonVars.h"
-#include "User.h"
 #include "NiPoint3.h"
 #include "NiQuaternion.h"
 #include "LDFFormat.h"
-#include "Loot.h"
-#include "Zone.h"
+#include "eKillType.h"
 
-#include "EntityTimer.h"
-#include "EntityCallbackTimer.h"
-#include "EntityInfo.h"
+namespace Loot {
+	class Info;
+};
+
+namespace tinyxml2 {
+	class XMLDocument;
+};
 
 class Player;
+class EntityInfo;
+class User;
 class Spawner;
 class ScriptComponent;
 class dpEntity;
+class EntityTimer;
 class Component;
+class Item;
 class Character;
+class EntityCallbackTimer;
+class PositionUpdate;
+enum class eTriggerEventType;
+enum class eGameMasterLevel : uint8_t;
+enum class eReplicaComponentType : uint32_t;
+enum class eReplicaPacketType : uint8_t;
+enum class eCinematicEvent : uint32_t;
+
+namespace CppScripts {
+	class Script;
+};
 
 /**
  * An entity in the world. Has multiple components.
  */
 class Entity {
 public:
-    explicit Entity(const LWOOBJID& objectID, EntityInfo info, Entity* parentEntity = nullptr);
-    virtual ~Entity();
+	explicit Entity(const LWOOBJID& objectID, EntityInfo info, User* parentUser = nullptr, Entity* parentEntity = nullptr);
+	~Entity();
 
-	virtual void Initialize();
-	
-    bool operator==(const Entity& other) const;
-    bool operator!=(const Entity& other) const;
+	void Initialize();
+
+	bool operator==(const Entity& other) const;
+	bool operator!=(const Entity& other) const;
 
 	/**
 	 * Getters
 	 */
-    
-    const LWOOBJID& GetObjectID() const { return m_ObjectID; }
 
-    const LOT GetLOT() const { return m_TemplateID; }
+	const LWOOBJID& GetObjectID() const { return m_ObjectID; }
 
-    Character* GetCharacter() const { return m_Character; }
+	const LOT GetLOT() const { return m_TemplateID; }
 
-    uint8_t GetGMLevel() const { return m_GMLevel; }
+	Character* GetCharacter() const { return m_Character; }
 
-    uint8_t GetCollectibleID() const { return uint8_t(m_CollectibleID); }
+	eGameMasterLevel GetGMLevel() const { return m_GMLevel; }
+
+	uint8_t GetCollectibleID() const;
 
 	Entity* GetParentEntity() const { return m_ParentEntity; }
-
-	LUTriggers::Trigger* GetTrigger() const { return m_Trigger; }
 
 	std::vector<std::string>& GetGroups() { return m_Groups; };
 
 	Spawner* GetSpawner() const { return m_Spawner; }
-	
+
 	LWOOBJID GetSpawnerID() const { return m_SpawnerID; }
 
 	const std::vector<LDFBaseData*>& GetSettings() const { return m_Settings; }
@@ -71,9 +83,10 @@ public:
 
 	bool GetIsDead() const;
 
-	bool GetPlayerReadyForUpdates() const { return m_PlayerIsReadyForUpdates;}
+	bool GetPlayerReadyForUpdates() const { return m_PlayerIsReadyForUpdates; }
 
 	bool GetIsGhostingCandidate() const;
+	void SetIsGhostingCandidate(bool value) { m_IsGhostingCandidate = value; };
 
 	int8_t GetObservers() const;
 
@@ -86,22 +99,20 @@ public:
 	const NiQuaternion& GetDefaultRotation() const;
 
 	float GetDefaultScale() const;
-	
+
 	const NiPoint3& GetPosition() const;
 
 	const NiQuaternion& GetRotation() const;
 
-	virtual User* GetParentUser() const;
-
-	virtual SystemAddress GetSystemAddress() const { return UNASSIGNED_SYSTEM_ADDRESS; };
+	const SystemAddress& GetSystemAddress() const;
 
 	/**
 	 * Setters
 	 */
 
-    void SetCharacter(Character* value) { m_Character = value; }
-	
-    void SetGMLevel(uint8_t value);
+	void SetCharacter(Character* value) { m_Character = value; }
+
+	void SetGMLevel(eGameMasterLevel value);
 
 	void SetOwnerOverride(LWOOBJID value);
 
@@ -111,39 +122,44 @@ public:
 
 	void SetNetworkId(uint16_t id);
 
-	void SetPosition(NiPoint3 position);
+	void SetPosition(const NiPoint3& position);
 
-	void SetRotation(NiQuaternion rotation);
+	void SetRotation(const NiQuaternion& rotation);
 
-	virtual void SetRespawnPos(NiPoint3 position) {}
+	void SetRespawnPos(const NiPoint3& position);
 
-	virtual void SetRespawnRot(NiQuaternion rotation) {}
-	
-	virtual void SetSystemAddress(const SystemAddress& value) {};
+	void SetRespawnRot(const NiQuaternion& rotation);
 
 	/**
 	 * Component management
 	 */
 
-    Component* GetComponent(int32_t componentID) const;
+	Component* GetComponent(eReplicaComponentType componentID) const;
 
 	template<typename T>
 	T* GetComponent() const;
 
 	template<typename T>
-	bool TryGetComponent(int32_t componentId, T*& component) const;
+	bool TryGetComponent(eReplicaComponentType componentId, T*& component) const;
 
-	bool HasComponent(int32_t componentId) const;
+	bool HasComponent(eReplicaComponentType componentId) const;
 
-	void AddComponent(int32_t componentId, Component* component);
+	void AddComponent(eReplicaComponentType componentId, Component* component);
 
-	std::vector<ScriptComponent*> GetScriptComponents();
+	// This is expceted to never return nullptr, an assert checks this.
+	CppScripts::Script* const GetScript();
+
+	void Subscribe(LWOOBJID scriptObjId, CppScripts::Script* scriptToAdd, const std::string& notificationName);
+	void Unsubscribe(LWOOBJID scriptObjId, const std::string& notificationName);
 
 	void SetProximityRadius(float proxRadius, std::string name);
 	void SetProximityRadius(dpEntity* entity, std::string name);
 
 	void AddChild(Entity* child);
 	void RemoveChild(Entity* child);
+	void RemoveParent();
+
+	// Adds a timer to start next frame with the given name and time.
 	void AddTimer(std::string name, float time);
 	void AddCallbackTimer(float time, std::function<void()> callback);
 	bool HasTimer(const std::string& name);
@@ -151,32 +167,31 @@ public:
 	void CancelAllTimers();
 	void CancelTimer(const std::string& name);
 
-    void AddToGroup(const std::string& group);
+	void AddToGroup(const std::string& group);
 	bool IsPlayer() const;
 
-	std::unordered_map<int32_t, Component*>& GetComponents() { return m_Components; } // TODO: Remove
-	
-	void WriteBaseReplicaData(RakNet::BitStream* outBitStream, eReplicaPacketType packetType);
-	void WriteComponents(RakNet::BitStream* outBitStream, eReplicaPacketType packetType);
-    void ResetFlags();
-    void UpdateXMLDoc(tinyxml2::XMLDocument* doc);
+	std::unordered_map<eReplicaComponentType, Component*>& GetComponents() { return m_Components; } // TODO: Remove
+
+	void WriteBaseReplicaData(RakNet::BitStream& outBitStream, eReplicaPacketType packetType);
+	void WriteComponents(RakNet::BitStream& outBitStream, eReplicaPacketType packetType);
+	void UpdateXMLDoc(tinyxml2::XMLDocument& doc);
 	void Update(float deltaTime);
 
 	// Events
 	void OnCollisionProximity(LWOOBJID otherEntity, const std::string& proxName, const std::string& status);
 	void OnCollisionPhantom(LWOOBJID otherEntity);
-    void OnCollisionLeavePhantom(LWOOBJID otherEntity);
+	void OnCollisionLeavePhantom(LWOOBJID otherEntity);
 
-    void OnFireEventServerSide(Entity* sender, std::string args, int32_t param1 = -1, int32_t param2 = -1, int32_t param3 = -1);
-    void OnActivityStateChangeRequest(const LWOOBJID senderID, const int32_t value1, const int32_t value2,
-                                      const std::u16string& stringValue);
-    void OnCinematicUpdate(Entity* self, Entity* sender, eCinematicEvent event, const std::u16string& pathName,
-                           float_t pathTime, float_t totalTime, int32_t waypoint);
+	void OnFireEventServerSide(Entity* sender, std::string args, int32_t param1 = -1, int32_t param2 = -1, int32_t param3 = -1);
+	void OnActivityStateChangeRequest(const LWOOBJID senderID, const int32_t value1, const int32_t value2,
+		const std::u16string& stringValue);
+	void OnCinematicUpdate(Entity* self, Entity* sender, eCinematicEvent event, const std::u16string& pathName,
+		float_t pathTime, float_t totalTime, int32_t waypoint);
 
 	void NotifyObject(Entity* sender, const std::string& name, int32_t param1 = 0, int32_t param2 = 0);
 	void OnEmoteReceived(int32_t emote, Entity* target);
-    
-    void OnUse(Entity* originator);
+
+	void OnUse(Entity* originator);
 
 	void OnHitOrHealResult(Entity* attacker, int32_t damage);
 	void OnHit(Entity* attacker);
@@ -192,10 +207,11 @@ public:
 
 	void OnMessageBoxResponse(Entity* sender, int32_t button, const std::u16string& identifier, const std::u16string& userData);
 	void OnChoiceBoxResponse(Entity* sender, int32_t button, const std::u16string& buttonIdentifier, const std::u16string& identifier);
+	void RequestActivityExit(Entity* sender, LWOOBJID player, bool canceled);
 
 	void Smash(const LWOOBJID source = LWOOBJID_EMPTY, const eKillType killType = eKillType::VIOLENT, const std::u16string& deathType = u"");
-	void Kill(Entity* murderer = nullptr);
-    void AddRebuildCompleteCallback(const std::function<void(Entity* user)>& callback) const;
+	void Kill(Entity* murderer = nullptr, const eKillType killType = eKillType::SILENT);
+	void AddQuickBuildCompleteCallback(const std::function<void(Entity* user)>& callback) const;
 	void AddCollisionPhantomCallback(const std::function<void(Entity* target)>& callback);
 	void AddDieCallback(const std::function<void()>& callback);
 	void Resurrect();
@@ -207,12 +223,11 @@ public:
 	void RegisterCoinDrop(uint64_t count);
 
 	void ScheduleKillAfterUpdate(Entity* murderer = nullptr);
-	void TriggerEvent(std::string eveneventtID, Entity* optionalTarget = nullptr);
+	void TriggerEvent(eTriggerEventType event, Entity* optionalTarget = nullptr);
 	void ScheduleDestructionAfterUpdate() { m_ShouldDestroyAfterUpdate = true; }
-	void HandleTriggerCommand(std::string id, std::string target, std::string targetName, std::string args, Entity* optionalTarget);
 
-	virtual NiPoint3 GetRespawnPosition() const { return NiPoint3::ZERO; }
-	virtual NiQuaternion GetRespawnRotation() const { return NiQuaternion::IDENTITY; }
+	const NiPoint3& GetRespawnPosition() const;
+	const NiQuaternion& GetRespawnRotation() const;
 
 	void Sleep();
 	void Wake();
@@ -221,15 +236,15 @@ public:
 	/*
 	 * Utility
 	 */
-	/**
-	 * Retroactively corrects the model vault size due to incorrect initialization in a previous patch.
-	 * 
-	 */
+	 /**
+	  * Retroactively corrects the model vault size due to incorrect initialization in a previous patch.
+	  *
+	  */
 	void RetroactiveVaultSize();
 	bool GetBoolean(const std::u16string& name) const;
 	int32_t GetI32(const std::u16string& name) const;
 	int64_t GetI64(const std::u16string& name) const;
-	
+
 	void SetBoolean(const std::u16string& name, bool value);
 	void SetI32(const std::u16string& name, int32_t value);
 	void SetI64(const std::u16string& name, int64_t value);
@@ -247,17 +262,20 @@ public:
 	template<typename T>
 	void SetNetworkVar(const std::u16string& name, T value, const SystemAddress& sysAddr = UNASSIGNED_SYSTEM_ADDRESS);
 
-    template<typename T>
-    void SetNetworkVar(const std::u16string& name, std::vector<T> value, const SystemAddress& sysAddr = UNASSIGNED_SYSTEM_ADDRESS);
+	template<typename T>
+	void SetNetworkVar(const std::u16string& name, std::vector<T> value, const SystemAddress& sysAddr = UNASSIGNED_SYSTEM_ADDRESS);
 
-    template<typename T>
-    T GetNetworkVar(const std::u16string& name);
+	template<typename T>
+	T GetNetworkVar(const std::u16string& name);
 
 	/**
 	 * Get the LDF value and cast it as T.
 	 */
 	template<typename T>
 	T GetVarAs(const std::u16string& name) const;
+
+	template<typename ComponentType, typename... VaArgs>
+	ComponentType* AddComponent(VaArgs... args);
 
 	/**
 	 * Get the LDF data.
@@ -272,44 +290,49 @@ public:
 	/*
 	 * Collision
 	 */
-	std::vector<LWOOBJID>& GetTargetsInPhantom();
+	std::vector<LWOOBJID> GetTargetsInPhantom();
 
 	Entity* GetScheduledKiller() { return m_ScheduleKiller; }
 
-protected:
-    LWOOBJID m_ObjectID;
-	
-    LOT m_TemplateID;
-	
-    std::vector<LDFBaseData*> m_Settings;
-    std::vector<LDFBaseData*> m_NetworkSettings;
+	void ProcessPositionUpdate(PositionUpdate& update);
 
-    NiPoint3 m_DefaultPosition;
-    NiQuaternion m_DefaultRotation;
+	// Scale will only be communicated to the client when the construction packet is sent
+	void SetScale(const float scale) { m_Scale = scale; };
+
+protected:
+	LWOOBJID m_ObjectID;
+
+	LOT m_TemplateID;
+
+	std::vector<LDFBaseData*> m_Settings;
+	std::vector<LDFBaseData*> m_NetworkSettings;
+
+	NiPoint3 m_DefaultPosition;
+	NiQuaternion m_DefaultRotation;
 	float m_Scale;
 
 	Spawner* m_Spawner;
-    LWOOBJID m_SpawnerID;
-    
-    bool m_HasSpawnerNodeID;
-    uint32_t m_SpawnerNodeID;
-    
-	LUTriggers::Trigger* m_Trigger;
+	LWOOBJID m_SpawnerID;
+
+	bool m_HasSpawnerNodeID;
+	uint32_t m_SpawnerNodeID;
 
 	Character* m_Character;
-	
-    Entity* m_ParentEntity; //For spawners and the like
+
+	Entity* m_ParentEntity; //For spawners and the like
 	std::vector<Entity*> m_ChildEntities;
-    uint8_t m_GMLevel;
-    uint16_t m_CollectibleID;
+	eGameMasterLevel m_GMLevel;
+	uint16_t m_CollectibleID;
 	std::vector<std::string> m_Groups;
 	uint16_t m_NetworkID;
 	std::vector<std::function<void()>> m_DieCallbacks;
-    std::vector<std::function<void(Entity* target)>> m_PhantomCollisionCallbacks;
-    
-    std::unordered_map<int32_t, Component*> m_Components; //The int is the ID of the component
-	std::vector<EntityTimer*> m_Timers;
-	std::vector<EntityCallbackTimer*> m_CallbackTimers;
+	std::vector<std::function<void(Entity* target)>> m_PhantomCollisionCallbacks;
+
+	std::unordered_map<eReplicaComponentType, Component*> m_Components;
+	std::vector<EntityTimer> m_Timers;
+	std::vector<EntityTimer> m_PendingTimers;
+	std::vector<EntityCallbackTimer> m_CallbackTimers;
+	std::vector<EntityCallbackTimer> m_PendingCallbackTimers;
 
 	bool m_ShouldDestroyAfterUpdate = false;
 
@@ -336,12 +359,10 @@ protected:
  */
 
 template<typename T>
-bool Entity::TryGetComponent(const int32_t componentId, T*& component) const
-{
+bool Entity::TryGetComponent(const eReplicaComponentType componentId, T*& component) const {
 	const auto& index = m_Components.find(componentId);
 
-	if (index == m_Components.end())
-	{
+	if (index == m_Components.end()) {
 		component = nullptr;
 
 		return false;
@@ -353,26 +374,22 @@ bool Entity::TryGetComponent(const int32_t componentId, T*& component) const
 }
 
 template <typename T>
-T* Entity::GetComponent() const
-{
+T* Entity::GetComponent() const {
 	return dynamic_cast<T*>(GetComponent(T::ComponentType));
 }
 
 
 template<typename T>
-const T& Entity::GetVar(const std::u16string& name) const
-{
+const T& Entity::GetVar(const std::u16string& name) const {
 	auto* data = GetVarData(name);
 
-	if (data == nullptr)
-	{
+	if (data == nullptr) {
 		return LDFData<T>::Default;
 	}
 
 	auto* typed = dynamic_cast<LDFData<T>*>(data);
 
-	if (typed == nullptr)
-	{
+	if (typed == nullptr) {
 		return LDFData<T>::Default;
 	}
 
@@ -380,27 +397,17 @@ const T& Entity::GetVar(const std::u16string& name) const
 }
 
 template<typename T>
-T Entity::GetVarAs(const std::u16string& name) const
-{
+T Entity::GetVarAs(const std::u16string& name) const {
 	const auto data = GetVarAsString(name);
-
-	T value;
-
-	if (!GeneralUtils::TryParse(data, value))
-	{
-		return LDFData<T>::Default;
-	}
-
-	return value;
+	
+	return GeneralUtils::TryParse<T>(data).value_or(LDFData<T>::Default);
 }
 
 template<typename T>
-void Entity::SetVar(const std::u16string& name, T value)
-{
+void Entity::SetVar(const std::u16string& name, T value) {
 	auto* data = GetVarData(name);
 
-	if (data == nullptr)
-	{
+	if (data == nullptr) {
 		auto* data = new LDFData<T>(name, value);
 
 		m_Settings.push_back(data);
@@ -410,8 +417,7 @@ void Entity::SetVar(const std::u16string& name, T value)
 
 	auto* typed = dynamic_cast<LDFData<T>*>(data);
 
-	if (typed == nullptr)
-	{
+	if (typed == nullptr) {
 		return;
 	}
 
@@ -420,81 +426,114 @@ void Entity::SetVar(const std::u16string& name, T value)
 
 template<typename T>
 void Entity::SetNetworkVar(const std::u16string& name, T value, const SystemAddress& sysAddr) {
-    LDFData<T>* newData = nullptr;
+	LDFData<T>* newData = nullptr;
 
-    for (auto* data :m_NetworkSettings) {
-        if (data->GetKey() != name)
-            continue;
+	for (auto* data : m_NetworkSettings) {
+		if (data->GetKey() != name)
+			continue;
 
-        newData = dynamic_cast<LDFData<T>*>(data);
-        if (newData != nullptr) {
-            newData->SetValue(value);
-        } else {  // If we're changing types
-            m_NetworkSettings.erase(
+		newData = dynamic_cast<LDFData<T>*>(data);
+		if (newData != nullptr) {
+			newData->SetValue(value);
+		} else {  // If we're changing types
+			m_NetworkSettings.erase(
 				std::remove(m_NetworkSettings.begin(), m_NetworkSettings.end(), data), m_NetworkSettings.end()
 			);
-            delete data;
-        }
+			delete data;
+		}
 
-        break;
-    }
+		break;
+	}
 
-    if (newData == nullptr) {
-        newData = new LDFData<T>(name, value);
-    }
+	if (newData == nullptr) {
+		newData = new LDFData<T>(name, value);
+	}
 
-    m_NetworkSettings.push_back(newData);
-    SendNetworkVar(newData->GetString(true), sysAddr);
+	m_NetworkSettings.push_back(newData);
+	SendNetworkVar(newData->GetString(true), sysAddr);
 }
 
 template<typename T>
 void Entity::SetNetworkVar(const std::u16string& name, std::vector<T> values, const SystemAddress& sysAddr) {
-    std::stringstream updates;
-    auto index = 1;
+	std::stringstream updates;
+	auto index = 1;
 
-    for (const auto& value : values) {
-        LDFData<T>* newData = nullptr;
-        const auto& indexedName = name + u"." + GeneralUtils::to_u16string(index);
+	for (const auto& value : values) {
+		LDFData<T>* newData = nullptr;
+		const auto& indexedName = name + u"." + GeneralUtils::to_u16string(index);
 
-        for (auto* data : m_NetworkSettings) {
-            if (data->GetKey() != indexedName)
-                continue;
+		for (auto* data : m_NetworkSettings) {
+			if (data->GetKey() != indexedName)
+				continue;
 
-            newData = dynamic_cast<LDFData<T>*>(data);
-            newData->SetValue(value);
-            break;
-        }
+			newData = dynamic_cast<LDFData<T>*>(data);
+			newData->SetValue(value);
+			break;
+		}
 
-        if (newData == nullptr) {
-            newData = new LDFData<T>(indexedName, value);
-        }
+		if (newData == nullptr) {
+			newData = new LDFData<T>(indexedName, value);
+		}
 
-        m_NetworkSettings.push_back(newData);
+		m_NetworkSettings.push_back(newData);
 
-        if (index == values.size()) {
-            updates << newData->GetString(true);
-        } else {
-            updates << newData->GetString(true) << "\n";
-        }
+		if (index == values.size()) {
+			updates << newData->GetString(true);
+		} else {
+			updates << newData->GetString(true) << "\n";
+		}
 
-        index++;
-    }
+		index++;
+	}
 
-    SendNetworkVar(updates.str(), sysAddr);
+	SendNetworkVar(updates.str(), sysAddr);
 }
 
 template<typename T>
 T Entity::GetNetworkVar(const std::u16string& name) {
-    for (auto* data : m_NetworkSettings) {
-        if (data == nullptr || data->GetKey() != name)
-            continue;
+	for (auto* data : m_NetworkSettings) {
+		if (data == nullptr || data->GetKey() != name)
+			continue;
 
-        auto* typed = dynamic_cast<LDFData<T>*>(data);
-        if (typed == nullptr)
-            continue;
+		auto* typed = dynamic_cast<LDFData<T>*>(data);
+		if (typed == nullptr)
+			continue;
 
-        return typed->GetValue();
-    }
+		return typed->GetValue();
+	}
 
-    return LDFData<T>::Default;
+	return LDFData<T>::Default;
+}
+
+/**
+ * @brief Adds a component of type ComponentType to this entity and forwards the arguments to the constructor.
+ *
+ * @tparam ComponentType The component class type to add. Must derive from Component.
+ * @tparam VaArgs The argument types to forward to the constructor.
+ * @param args The arguments to forward to the constructor. The first argument passed to the ComponentType constructor will be this entity.
+ * @return ComponentType* The added component. Will never return null.
+ */
+template<typename ComponentType, typename... VaArgs>
+inline ComponentType* Entity::AddComponent(VaArgs... args) {
+	static_assert(std::is_base_of_v<Component, ComponentType>, "ComponentType must be a Component");
+
+	// Get the component if it already exists, or default construct a nullptr
+	auto*& componentToReturn = m_Components[ComponentType::ComponentType];
+
+	// If it doesn't exist, create it and forward the arguments to the constructor
+	if (!componentToReturn) {
+		componentToReturn = new ComponentType(this, std::forward<VaArgs>(args)...);
+	} else {
+		// In this case the block is already allocated and ready for use
+		// so we use a placement new to construct the component again as was requested by the caller.
+		// Placement new means we already have memory allocated for the object, so this just calls its constructor again.
+		// This is useful for when we want to create a new object in the same memory location as an old one.
+		componentToReturn->~Component();
+		new(componentToReturn) ComponentType(this, std::forward<VaArgs>(args)...);
+	}
+
+	// Finally return the created or already existing component.
+	// Because of the assert above, this should always be a ComponentType* but I need a way to guarantee the map cannot be modifed outside this function
+	// To allow a static cast here instead of a dynamic one.
+	return dynamic_cast<ComponentType*>(componentToReturn);
 }

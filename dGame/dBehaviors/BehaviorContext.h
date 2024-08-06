@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "RakPeerInterface.h"
 #include "dCommonVars.h"
@@ -6,6 +6,7 @@
 #include "GameMessages.h"
 
 #include <vector>
+#include <forward_list>
 
 class Behavior;
 
@@ -16,7 +17,7 @@ struct BehaviorSyncEntry
 	float time = 0;
 
 	bool ignoreInterrupts = false;
-	
+
 	Behavior* behavior = nullptr;
 
 	BehaviorBranchContext branchContext;
@@ -46,7 +47,7 @@ struct BehaviorEndEntry
 	BehaviorBranchContext branchContext;
 
 	LWOOBJID second = LWOOBJID_EMPTY;
-	
+
 	BehaviorEndEntry();
 };
 
@@ -65,11 +66,11 @@ struct BehaviorContext
 	bool failed = false;
 
 	bool clientInitalized = false;
-	
+
 	std::vector<BehaviorSyncEntry> syncEntries;
-	
+
 	std::vector<BehaviorTimerEntry> timerEntries;
-	
+
 	std::vector<BehaviorEndEntry> endEntries;
 
 	std::vector<LWOOBJID> scheduledUpdates;
@@ -80,7 +81,9 @@ struct BehaviorContext
 
 	uint32_t GetUniqueSkillId() const;
 
-	void RegisterSyncBehavior(uint32_t syncId, Behavior* behavior, const BehaviorBranchContext& branchContext);
+	void UpdatePlayerSyncs(float deltaTime);
+
+	void RegisterSyncBehavior(uint32_t syncId, Behavior* behavior, const BehaviorBranchContext& branchContext, const float duration, bool ignoreInterrupts = false);
 
 	void RegisterTimerBehavior(Behavior* behavior, const BehaviorBranchContext& branchContext, LWOOBJID second = LWOOBJID_EMPTY);
 
@@ -89,23 +92,27 @@ struct BehaviorContext
 	void ScheduleUpdate(LWOOBJID id);
 
 	void ExecuteUpdates();
-	
-	void SyncBehavior(uint32_t syncId, RakNet::BitStream* bitStream);
+
+	bool SyncBehavior(uint32_t syncId, RakNet::BitStream& bitStream);
 
 	void Update(float deltaTime);
-	
+
 	void SyncCalculation(uint32_t syncId, float time, Behavior* behavior, const BehaviorBranchContext& branch, bool ignoreInterrupts = false);
 
 	void InvokeEnd(uint32_t id);
-	
+
 	bool CalculateUpdate(float deltaTime);
 
 	void Interrupt();
 
 	void Reset();
 
-	std::vector<LWOOBJID> GetValidTargets(int32_t ignoreFaction = 0, int32_t includeFaction = 0, const bool targetSelf = false, const bool targetEnemy = true, const bool targetFriend = false) const;
-	
+	void FilterTargets(std::vector<Entity*>& targetsReference, std::forward_list<int32_t>& ignoreFaction, std::forward_list<int32_t>& includeFaction, const bool targetSelf = false, const bool targetEnemy = true, const bool targetFriend = false, const bool targetTeam = false) const;
+
+	bool CheckTargetingRequirements(const Entity* target) const;
+
+	bool CheckFactionList(std::forward_list<int32_t>& factionList, std::vector<int32_t>& objectsFactions) const;
+
 	explicit BehaviorContext(LWOOBJID originator, bool calculation = false);
 
 	~BehaviorContext();

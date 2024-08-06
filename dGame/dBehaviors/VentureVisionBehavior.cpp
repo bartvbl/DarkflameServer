@@ -2,10 +2,10 @@
 #include "BehaviorBranchContext.h"
 #include "CharacterComponent.h"
 #include "BehaviorContext.h"
-	
-void VentureVisionBehavior::Handle(BehaviorContext* context, RakNet::BitStream* bitStream, BehaviorBranchContext branch){
 
-	const auto targetEntity = EntityManager::Instance()->GetEntity(branch.target);
+void VentureVisionBehavior::Handle(BehaviorContext* context, RakNet::BitStream& bitStream, BehaviorBranchContext branch) {
+
+	const auto targetEntity = Game::entityManager->GetEntity(branch.target);
 
 	if (targetEntity) {
 		auto characterComponent = targetEntity->GetComponent<CharacterComponent>();
@@ -21,7 +21,7 @@ void VentureVisionBehavior::Handle(BehaviorContext* context, RakNet::BitStream* 
 }
 
 void VentureVisionBehavior::UnCast(BehaviorContext* context, BehaviorBranchContext branch) {
-	const auto targetEntity = EntityManager::Instance()->GetEntity(branch.target);
+	const auto targetEntity = Game::entityManager->GetEntity(branch.target);
 
 	if (targetEntity) {
 		auto characterComponent = targetEntity->GetComponent<CharacterComponent>();
@@ -38,7 +38,7 @@ void VentureVisionBehavior::Timer(BehaviorContext* context, BehaviorBranchContex
 	UnCast(context, branch);
 }
 
-void VentureVisionBehavior::Load(){
+void VentureVisionBehavior::Load() {
 	this->m_show_pet_digs = GetBoolean("show_pet_digs");
 
 	this->m_show_minibosses = GetBoolean("show_minibosses");

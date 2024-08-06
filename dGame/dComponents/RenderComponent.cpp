@@ -1,237 +1,181 @@
 #include "RenderComponent.h"
 
+#include <algorithm>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <iomanip>
 
 #include "Entity.h"
-#include "PacketUtils.h"
 
 #include "CDClientManager.h"
 #include "GameMessages.h"
 #include "Game.h"
-#include "dLogger.h"
+#include "Logger.h"
+#include "CDAnimationsTable.h"
 
-std::unordered_map<int32_t, float> RenderComponent::m_DurationCache {};
+std::unordered_map<int32_t, float> RenderComponent::m_DurationCache{};
 
-RenderComponent::RenderComponent(Entity* parent) : Component(parent) {
-    m_Effects = std::vector<Effect*>();
+RenderComponent::RenderComponent(Entity* const parentEntity, const int32_t componentId) : Component{ parentEntity } {
+	m_LastAnimationName = "";
+	if (componentId == -1) return;
 
-    return;
+	auto query = CDClientDatabase::CreatePreppedStmt("SELECT * FROM RenderComponent WHERE id = ?;");
+	query.bind(1, componentId);
+	auto result = query.execQuery();
 
-    /*
-    auto* table = CDClientManager::Instance()->GetTable<CDComponentsRegistryTable>("ComponentsRegistry");
+	if (!result.eof()) {
+		auto animationGroupIDs = std::string(result.getStringField("animationGroupIDs", ""));
+		if (!animationGroupIDs.empty()) {
+			auto* animationsTable = CDClientManager::GetTable<CDAnimationsTable>();
+			auto groupIdsSplit = GeneralUtils::SplitString(animationGroupIDs, ',');
+			for (auto& groupId : groupIdsSplit) {
+				const auto groupIdInt = GeneralUtils::TryParse<int32_t>(groupId);
 
-    const auto entry = table->GetByIDAndType(parent->GetLOT(), COMPONENT_TYPE_RENDER);
-
-	std::stringstream query;
-
-    query << "SELECT effect1, effect2, effect3, effect4, effect5, effect6 FROM RenderComponent WHERE id = " << std::to_string(entry) << ";";
-
-    auto result = CDClientDatabase::ExecuteQuery(query.str());
-
-    if (result.eof())
-    {
-	    return;
-    }
-	
-	for (auto i = 0; i < 6; ++i)
-    {
-		if (result.fieldIsNull(i))
-		{
-			continue;
+				if (!groupIdInt) {
+					LOG("bad animation group Id %s", groupId.c_str());
+					continue;
+				}
+				
+				m_animationGroupIds.push_back(groupIdInt.value());
+				animationsTable->CacheAnimationGroup(groupIdInt.value());
+			}
 		}
-		
-        const auto id = result.getIntField(i);
-
-		if (id <= 0)
-		{
-			continue;
-		}
-		
-        query.clear();
-
-        query << "SELECT effectType, effectName FROM BehaviorEffect WHERE effectID = " << std::to_string(id) << ";";
-
-        auto effectResult = CDClientDatabase::ExecuteQuery(query.str());
-
-        while (!effectResult.eof())
-        {
-            const auto type = effectResult.fieldIsNull(0) ? "" : std::string(effectResult.getStringField(0));
-        	
-            const auto name = effectResult.fieldIsNull(1) ? "" : std::string(effectResult.getStringField(1));
-
-            auto* effect = new Effect();
-
-            effect->name = name;
-            effect->type = GeneralUtils::ASCIIToUTF16(type);
-            effect->scale = 1;
-            effect->effectID = id;
-            effect->secondary = LWOOBJID_EMPTY;
-        	
-            m_Effects.push_back(effect);
-        	
-            effectResult.nextRow();
-        }
-    }
-
+	}
 	result.finalize();
-    */
 }
 
-RenderComponent::~RenderComponent() {
-    for (Effect* eff : m_Effects) {
-        if (eff) {
-            delete eff;
-            eff = nullptr;
-        }
-    }
-    
-    m_Effects.clear();
+void RenderComponent::Serialize(RakNet::BitStream& outBitStream, bool bIsInitialUpdate) {
+	if (!bIsInitialUpdate) return;
+
+	outBitStream.Write<uint32_t>(m_Effects.size());
+
+	for (auto& eff : m_Effects) {
+		outBitStream.Write<uint8_t>(eff.name.size());
+		// if there is no name, then we don't write anything else
+		if (eff.name.empty()) continue;
+
+		for (const auto& value : eff.name) outBitStream.Write<uint8_t>(value);
+
+		outBitStream.Write(eff.effectID);
+
+		outBitStream.Write<uint8_t>(eff.type.size());
+		for (const auto& value : eff.type) outBitStream.Write<uint16_t>(value);
+
+		outBitStream.Write<float_t>(eff.priority);
+		outBitStream.Write<int64_t>(eff.secondary);
+	}
 }
 
-void RenderComponent::Serialize(RakNet::BitStream* outBitStream, bool bIsInitialUpdate, unsigned int& flags) {
-    if (!bIsInitialUpdate) return;
-    
-    outBitStream->Write<uint32_t>(m_Effects.size());
-    
-    for (Effect* eff : m_Effects) {
-        // Check that the effect is non-null
-        assert(eff);
-
-        outBitStream->Write<uint8_t>(eff->name.size());
-        for (const auto& value : eff->name)
-            outBitStream->Write<uint8_t>(value);
-
-        outBitStream->Write(eff->effectID);
-
-        outBitStream->Write<uint8_t>(eff->type.size());
-        for (const auto& value : eff->type)
-            outBitStream->Write<uint16_t>(value);
-
-        outBitStream->Write<float_t>(eff->scale);
-        outBitStream->Write<int64_t>(eff->secondary);
-    }
-}
-
-Effect* RenderComponent::AddEffect(const int32_t effectId, const std::string& name, const std::u16string& type) {
-    auto* eff = new Effect();
-	
-    eff->effectID = effectId;
-	
-    eff->name = name;
-	
-    eff->type = type;
-	
-    m_Effects.push_back(eff);
-
-    return eff;
+Effect& RenderComponent::AddEffect(const int32_t effectId, const std::string& name, const std::u16string& type, const float priority) {
+	return m_Effects.emplace_back(effectId, name, type, priority);
 }
 
 void RenderComponent::RemoveEffect(const std::string& name) {
-    uint32_t index = -1;
+	if (m_Effects.empty()) return;
 
-    for (auto i = 0u; i < m_Effects.size(); ++i)
-    {
-        auto* eff = m_Effects[i];
+	const auto effectToRemove = std::ranges::find_if(m_Effects, [&name](auto&& effect) { return effect.name == name; });
+	if (effectToRemove == m_Effects.end()) return; // Return early if effect is not present
 
-    	if (eff->name == name)
-    	{
-            index = i;
+	const auto lastEffect = m_Effects.rbegin();
+	*effectToRemove = std::move(*lastEffect); // Move-overwrite
+	m_Effects.pop_back();
+}
 
-            delete eff;
+void RenderComponent::Update(const float deltaTime) {	
+	for (auto& effect : m_Effects) {
+		if (effect.time == 0) continue; // Skip persistent effects
 
-    		break;
-    	}
-    }
+		const auto result = effect.time - deltaTime;
+		if (result <= 0) continue;
 
-	if (index == -1)
-	{
+		effect.time = result;
+	}
+}
+
+void RenderComponent::PlayEffect(const int32_t effectId, const std::u16string& effectType, const std::string& name, const LWOOBJID secondary, const float priority, const float scale, const bool serialize) {
+	RemoveEffect(name);
+
+	GameMessages::SendPlayFXEffect(m_Parent, effectId, effectType, name, secondary, priority, scale, serialize);
+
+	auto& effect = AddEffect(effectId, name, effectType, priority);
+
+	const auto& pair = m_DurationCache.find(effectId);
+
+	if (pair != m_DurationCache.end()) {
+		effect.time = pair->second;
+
 		return;
 	}
-	
-    m_Effects.erase(m_Effects.begin() + index);}
 
-void RenderComponent::Update(const float deltaTime)
-{
-    std::vector<Effect*> dead;
+	const std::string effectType_str = GeneralUtils::UTF16ToWTF8(effectType);
 
-    for (auto* effect : m_Effects)
-    {
-    	if (effect->time == 0)
-    	{
-    		continue; // Skip persistent effects
-    	}
-    	
-        const auto result = effect->time - deltaTime;
+	auto query = CDClientDatabase::CreatePreppedStmt(
+		"SELECT animation_length FROM Animations WHERE animation_type IN (SELECT animationName FROM BehaviorEffect WHERE effectID = ? AND effectType = ?);");
+	query.bind(1, effectId);
+	query.bind(2, effectType_str.c_str());
 
-    	if (result <= 0)
-    	{
-            dead.push_back(effect);
-    		
-    		continue;
-    	}
-    	
-        effect->time = result;
-    }
+	auto result = query.execQuery();
 
-    for (auto* effect : dead)
-    {
-//        StopEffect(effect->name);
-    }
-}
+	if (result.eof() || result.fieldIsNull("animation_length")) {
+		result.finalize();
 
-void RenderComponent::PlayEffect(const int32_t effectId, const std::u16string& effectType, const std::string& name, const LWOOBJID secondary, const float priority, const float scale, const bool serialize)
-{
-    RemoveEffect(name);
-	
-    GameMessages::SendPlayFXEffect(m_Parent, effectId, effectType, name, secondary, priority, scale, serialize);
+		m_DurationCache[effectId] = 0;
 
-    auto* effect = AddEffect(effectId, name, effectType);
+		effect.time = 0; // Persistent effect
 
-    const auto& pair = m_DurationCache.find(effectId);
+		return;
+	}
 
-    if (pair != m_DurationCache.end())
-    {
-        effect->time = pair->second;
+	effect.time = static_cast<float>(result.getFloatField("animation_length"));
 
-        return;
-    }
-
-    const std::string effectType_str = GeneralUtils::UTF16ToWTF8(effectType);
-
-    auto query = CDClientDatabase::CreatePreppedStmt(
-        "SELECT animation_length FROM Animations WHERE animation_type IN (SELECT animationName FROM BehaviorEffect WHERE effectID = ? AND effectType = ?);");
-    query.bind(1, effectId);
-    query.bind(2, effectType_str.c_str());
-
-    auto result = query.execQuery();
-
-    if (result.eof() || result.fieldIsNull(0)) {
-        result.finalize();
-
-        m_DurationCache[effectId] = 0;
-
-        effect->time = 0; // Persistent effect
-    	
-        return;
-    }
-
-    effect->time = static_cast<float>(result.getFloatField(0));
-    
 	result.finalize();
-    
-    m_DurationCache[effectId] = effect->time;
+
+	m_DurationCache[effectId] = effect.time;
 }
 
-void RenderComponent::StopEffect(const std::string& name, const bool killImmediate)
-{
-    GameMessages::SendStopFXEffect(m_Parent, killImmediate, name);
+void RenderComponent::StopEffect(const std::string& name, const bool killImmediate) {
+	GameMessages::SendStopFXEffect(m_Parent, killImmediate, name);
 
-    RemoveEffect(name);
+	RemoveEffect(name);
 }
 
-std::vector<Effect*>& RenderComponent::GetEffects()
-{
-    return m_Effects;
+float RenderComponent::PlayAnimation(Entity* self, const std::u16string& animation, float priority, float scale) {
+	if (!self) return 0.0f;
+	return RenderComponent::PlayAnimation(self, GeneralUtils::UTF16ToWTF8(animation), priority, scale);
+}
+
+float RenderComponent::PlayAnimation(Entity* self, const std::string& animation, float priority, float scale) {
+	if (!self) return 0.0f;
+	return RenderComponent::DoAnimation(self, animation, true, priority, scale);
+}
+
+float RenderComponent::GetAnimationTime(Entity* self, const std::u16string& animation) {
+	if (!self) return 0.0f;
+	return RenderComponent::GetAnimationTime(self, GeneralUtils::UTF16ToWTF8(animation));
+}
+
+float RenderComponent::GetAnimationTime(Entity* self, const std::string& animation) {
+	if (!self) return 0.0f;
+	return RenderComponent::DoAnimation(self, animation, false);
+}
+
+
+float RenderComponent::DoAnimation(Entity* self, const std::string& animation, bool sendAnimation, float priority, float scale) {
+	float returnlength = 0.0f;
+	if (!self) return returnlength;
+	auto* renderComponent = self->GetComponent<RenderComponent>();
+	if (!renderComponent) return returnlength;
+
+	auto* animationsTable = CDClientManager::GetTable<CDAnimationsTable>();
+	for (auto& groupId : renderComponent->m_animationGroupIds) {
+		auto animationGroup = animationsTable->GetAnimation(animation, renderComponent->GetLastAnimationName(), groupId);
+		if (animationGroup) {
+			renderComponent->SetLastAnimationName(animationGroup->animation_name);
+			returnlength = animationGroup->animation_length;
+		}
+	}
+	if (sendAnimation) GameMessages::SendPlayAnimation(self, GeneralUtils::ASCIIToUTF16(animation), priority, scale);
+	if (returnlength == 0.0f) LOG("WARNING: Unable to find animation %s for lot %i in any group.", animation.c_str(), self->GetLOT());
+	return returnlength;
 }

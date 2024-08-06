@@ -1,50 +1,55 @@
-﻿#include "ProjectileAttackBehavior.h"
+#include "ProjectileAttackBehavior.h"
 #include "BehaviorBranchContext.h"
 #include "BehaviorContext.h"
 #include "EntityManager.h"
 #include "Game.h"
-#include "dLogger.h"
+#include "Logger.h"
 #include "SkillComponent.h"
-#include "../dWorldServer/ObjectIDManager.h"
+#include "ObjectIDManager.h"
+#include "eObjectBits.h"
 
-void ProjectileAttackBehavior::Handle(BehaviorContext* context, RakNet::BitStream* bitStream, BehaviorBranchContext branch)
-{
-	LWOOBJID target;
+void ProjectileAttackBehavior::Handle(BehaviorContext* context, RakNet::BitStream& bitStream, BehaviorBranchContext branch) {
+	LWOOBJID target{};
 
-	bitStream->Read(target);
-	
-	auto* entity = EntityManager::Instance()->GetEntity(context->originator);
+	if (!bitStream.Read(target)) {
+		LOG("Unable to read target from bitStream, aborting Handle! %i", bitStream.GetNumberOfUnreadBits());
+		return;
+	};
 
-	if (entity == nullptr)
-	{
-		Game::logger->Log("ProjectileAttackBehavior", "Failed to find originator (%llu)!\n", context->originator);
+	auto* entity = Game::entityManager->GetEntity(context->originator);
+
+	if (entity == nullptr) {
+		LOG("Failed to find originator (%llu)!", context->originator);
 
 		return;
 	}
 
 	auto* skillComponent = entity->GetComponent<SkillComponent>();
 
-	if (skillComponent == nullptr)
-	{
-		Game::logger->Log("ProjectileAttackBehavior", "Failed to find skill component for (%llu)!\n", -context->originator);
+	if (skillComponent == nullptr) {
+		LOG("Failed to find skill component for (%llu)!", -context->originator);
 
 		return;
 	}
 
-	if (m_useMouseposit)
-	{
-		NiPoint3 targetPosition = NiPoint3::ZERO;
-		bitStream->Read(targetPosition);
+	if (m_useMouseposit && !branch.isSync) {
+		NiPoint3 targetPosition = NiPoint3Constant::ZERO;
+		if (!bitStream.Read(targetPosition)) {
+			LOG("Unable to read targetPosition from bitStream, aborting Handle! %i", bitStream.GetNumberOfUnreadBits());
+			return;
+		};
 	}
 
-	auto* targetEntity = EntityManager::Instance()->GetEntity(target);
+	auto* targetEntity = Game::entityManager->GetEntity(target);
 
-	for (auto i = 0u; i < this->m_projectileCount; ++i)
-	{
-		LWOOBJID projectileId;
+	for (auto i = 0u; i < this->m_projectileCount; ++i) {
+		LWOOBJID projectileId{};
 
-		bitStream->Read(projectileId);
-		
+		if (!bitStream.Read(projectileId)) {
+			LOG("Unable to read projectileId from bitStream, aborting Handle! %i", bitStream.GetNumberOfUnreadBits());
+			return;
+		};
+
 		branch.target = target;
 		branch.isProjectile = true;
 		branch.referencePosition = targetEntity == nullptr ? entity->GetPosition() : targetEntity->GetPosition();
@@ -53,35 +58,31 @@ void ProjectileAttackBehavior::Handle(BehaviorContext* context, RakNet::BitStrea
 	}
 }
 
-void ProjectileAttackBehavior::Calculate(BehaviorContext* context, RakNet::BitStream* bitStream, BehaviorBranchContext branch)
-{
-	bitStream->Write(branch.target);
+void ProjectileAttackBehavior::Calculate(BehaviorContext* context, RakNet::BitStream& bitStream, BehaviorBranchContext branch) {
+	bitStream.Write(branch.target);
 
-	auto* entity = EntityManager::Instance()->GetEntity(context->originator);
+	auto* entity = Game::entityManager->GetEntity(context->originator);
 
-	if (entity == nullptr)
-	{
-		Game::logger->Log("ProjectileAttackBehavior", "Failed to find originator (%llu)!\n", context->originator);
+	if (entity == nullptr) {
+		LOG("Failed to find originator (%llu)!", context->originator);
 
 		return;
 	}
 
 	auto* skillComponent = entity->GetComponent<SkillComponent>();
 
-	if (skillComponent == nullptr)
-	{
-		Game::logger->Log("ProjectileAttackBehavior", "Failed to find skill component for (%llu)!\n", context->originator);
+	if (skillComponent == nullptr) {
+		LOG("Failed to find skill component for (%llu)!", context->originator);
 
 		return;
 
 	}
 
-	auto* other = EntityManager::Instance()->GetEntity(branch.target);
+	auto* other = Game::entityManager->GetEntity(branch.target);
 
-	if (other == nullptr)
-	{
-		Game::logger->Log("ProjectileAttackBehavior", "Invalid projectile target (%llu)!\n", branch.target);
-		
+	if (other == nullptr) {
+		LOG("Invalid projectile target (%llu)!", branch.target);
+
 		return;
 	}
 
@@ -104,13 +105,12 @@ void ProjectileAttackBehavior::Calculate(BehaviorContext* context, RakNet::BitSt
 
 	const auto maxTime = this->m_maxDistance / this->m_projectileSpeed;
 
-	for (auto i = 0u; i < this->m_projectileCount; ++i)
-	{
-		auto id = static_cast<LWOOBJID>(ObjectIDManager::Instance()->GenerateObjectID());
+	for (auto i = 0u; i < this->m_projectileCount; ++i) {
+		auto id = static_cast<LWOOBJID>(ObjectIDManager::GenerateObjectID());
 
-		id = GeneralUtils::SetBit(id, OBJECT_BIT_CLIENT);
+		GeneralUtils::SetBit(id, eObjectBits::SPAWNED);
 
-		bitStream->Write(id);
+		bitStream.Write(id);
 
 		auto eulerAngles = rotation.GetEulerAngles();
 
@@ -128,25 +128,20 @@ void ProjectileAttackBehavior::Calculate(BehaviorContext* context, RakNet::BitSt
 		skillComponent->RegisterCalculatedProjectile(id, context, branch, this->m_lot, maxTime, position, direction * this->m_projectileSpeed, this->m_trackTarget, this->m_trackRadius);
 
 		// No idea how to calculate this properly
-		if (this->m_projectileCount == 2)
-		{
+		if (this->m_projectileCount == 2) {
 			angle += angleDelta;
-		}
-		else if (this->m_projectileCount == 3)
-		{
+		} else if (this->m_projectileCount == 3) {
 			angle += angleStep;
 		}
 	}
 }
 
-void ProjectileAttackBehavior::Load()
-{
+void ProjectileAttackBehavior::Load() {
 	this->m_lot = GetInt("LOT_ID");
 
 	this->m_projectileCount = GetInt("spread_count");
 
-	if (this->m_projectileCount == 0)
-	{
+	if (this->m_projectileCount == 0) {
 		this->m_projectileCount = 1;
 	}
 
@@ -163,4 +158,6 @@ void ProjectileAttackBehavior::Load()
 	this->m_trackRadius = GetFloat("track_radius");
 
 	this->m_useMouseposit = GetBoolean("use_mouseposit");
+
+	this->m_ProjectileType = GetInt("projectile_type");
 }
