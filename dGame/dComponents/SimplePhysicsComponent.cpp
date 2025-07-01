@@ -13,7 +13,7 @@
 
 #include "Entity.h"
 
-SimplePhysicsComponent::SimplePhysicsComponent(Entity* parent, uint32_t componentID) : PhysicsComponent(parent) {
+SimplePhysicsComponent::SimplePhysicsComponent(Entity* parent, int32_t componentID) : PhysicsComponent(parent, componentID) {
 	m_Position = m_Parent->GetDefaultPosition();
 	m_Rotation = m_Parent->GetDefaultRotation();
 
@@ -27,9 +27,17 @@ SimplePhysicsComponent::SimplePhysicsComponent(Entity* parent, uint32_t componen
 	} else {
 		SetClimbableType(eClimbableType::CLIMBABLE_TYPE_NOT);
 	}
+	m_PhysicsMotionState = m_Parent->GetVarAs<uint32_t>(u"motionType");
 }
 
 SimplePhysicsComponent::~SimplePhysicsComponent() {
+}
+
+void SimplePhysicsComponent::Update(const float deltaTime) {
+	if (m_Velocity == NiPoint3Constant::ZERO) return;
+	m_Position += m_Velocity * deltaTime;
+	m_DirtyPosition = true;
+	Game::entityManager->SerializeEntity(m_Parent);
 }
 
 void SimplePhysicsComponent::Serialize(RakNet::BitStream& outBitStream, bool bIsInitialUpdate) {
@@ -47,11 +55,10 @@ void SimplePhysicsComponent::Serialize(RakNet::BitStream& outBitStream, bool bIs
 	}
 
 	// Physics motion state
-	if (m_PhysicsMotionState != 0) {
-		outBitStream.Write1();
+	outBitStream.Write(m_DirtyPhysicsMotionState || bIsInitialUpdate);
+	if (m_DirtyPhysicsMotionState || bIsInitialUpdate) {
 		outBitStream.Write<uint32_t>(m_PhysicsMotionState);
-	} else {
-		outBitStream.Write0();
+		m_DirtyPhysicsMotionState = false;
 	}
 	PhysicsComponent::Serialize(outBitStream, bIsInitialUpdate);
 }
@@ -61,5 +68,6 @@ uint32_t SimplePhysicsComponent::GetPhysicsMotionState() const {
 }
 
 void SimplePhysicsComponent::SetPhysicsMotionState(uint32_t value) {
+	m_DirtyPhysicsMotionState = m_PhysicsMotionState != value;
 	m_PhysicsMotionState = value;
 }

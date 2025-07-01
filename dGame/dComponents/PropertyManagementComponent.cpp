@@ -26,6 +26,7 @@
 #include <vector>
 #include "CppScripts.h"
 #include <ranges>
+#include "dConfig.h"
 
 PropertyManagementComponent* PropertyManagementComponent::instance = nullptr;
 
@@ -151,7 +152,11 @@ void PropertyManagementComponent::SetPrivacyOption(PropertyPrivacyOption value) 
 	info.rejectionReason = rejectionReason;
 	info.modApproved = 0;
 
-	Database::Get()->UpdatePropertyModerationInfo(info);
+	if (models.empty() && Game::config->GetValue("auto_reject_empty_properties") == "1") {
+		UpdateApprovedStatus(false, "Your property is empty. Please place a model to have a public property.");
+	} else {
+		Database::Get()->UpdatePropertyModerationInfo(info);
+	}
 }
 
 void PropertyManagementComponent::UpdatePropertyDetails(std::string name, std::string description) {
@@ -165,7 +170,9 @@ void PropertyManagementComponent::UpdatePropertyDetails(std::string name, std::s
 	info.id = propertyId;
 	info.name = propertyName;
 	info.description = propertyDescription;
-
+	info.lastUpdatedTime = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+	
+	Database::Get()->UpdateLastSave(info);
 	Database::Get()->UpdatePropertyDetails(info);
 
 	OnQueryPropertyData(GetOwner(), UNASSIGNED_SYSTEM_ADDRESS);
@@ -253,6 +260,22 @@ void PropertyManagementComponent::OnStartBuilding() {
 
 	// Push equipped items
 	if (inventoryComponent) inventoryComponent->PushEquippedItems();
+
+	for (auto modelID : models | std::views::keys) {
+		auto* model = Game::entityManager->GetEntity(modelID);
+		if (model) {
+			auto* modelComponent = model->GetComponent<ModelComponent>();
+			if (modelComponent) modelComponent->Pause();
+			Game::entityManager->SerializeEntity(model);
+			GameMessages::ResetModelToDefaults reset;
+			reset.target = modelID;
+			model->HandleMsg(reset);
+		}
+	}
+
+	for (auto* const entity : Game::entityManager->GetEntitiesInGroup("SpawnedPropertyEnemies")) {
+		if (entity) entity->Smash();
+	}
 }
 
 void PropertyManagementComponent::OnFinishBuilding() {
@@ -265,6 +288,22 @@ void PropertyManagementComponent::OnFinishBuilding() {
 	UpdateApprovedStatus(false);
 
 	Save();
+
+	for (auto modelID : models | std::views::keys) {
+		auto* model = Game::entityManager->GetEntity(modelID);
+		if (model) {
+			auto* modelComponent = model->GetComponent<ModelComponent>();
+			if (modelComponent) modelComponent->Resume();
+			Game::entityManager->SerializeEntity(model);
+			GameMessages::ResetModelToDefaults reset;
+			reset.target = modelID;
+			model->HandleMsg(reset);
+		}
+	}
+
+	for (auto* const entity : Game::entityManager->GetEntitiesInGroup("SpawnedPropertyEnemies")) {
+		if (entity) entity->Smash();
+	}
 }
 
 void PropertyManagementComponent::UpdateModelPosition(const LWOOBJID id, const NiPoint3 position, NiQuaternion rotation) {
@@ -316,6 +355,8 @@ void PropertyManagementComponent::UpdateModelPosition(const LWOOBJID id, const N
 		Entity* newEntity = Game::entityManager->CreateEntity(info);
 		if (newEntity != nullptr) {
 			Game::entityManager->ConstructEntity(newEntity);
+			auto* modelComponent = newEntity->GetComponent<ModelComponent>();
+			if (modelComponent) modelComponent->Pause();
 
 			// Make sure the propMgmt doesn't delete our model after the server dies
 			// Trying to do this after the entity is constructed. Shouldn't really change anything but
@@ -361,6 +402,8 @@ void PropertyManagementComponent::UpdateModelPosition(const LWOOBJID id, const N
 		info.nodes[0]->config.push_back(new LDFData<int>(u"componentWhitelist", 1));
 
 		auto* model = spawner->Spawn();
+		auto* modelComponent = model->GetComponent<ModelComponent>();
+		if (modelComponent) modelComponent->Pause();
 
 		models.insert_or_assign(model->GetObjectID(), spawnerId);
 
@@ -535,14 +578,14 @@ void PropertyManagementComponent::DeleteModel(const LWOOBJID id, const int delet
 	}
 }
 
-void PropertyManagementComponent::UpdateApprovedStatus(const bool value) {
+void PropertyManagementComponent::UpdateApprovedStatus(const bool value, const std::string& rejectionReason) {
 	if (owner == LWOOBJID_EMPTY) return;
 
 	IProperty::Info info;
 	info.id = propertyId;
 	info.modApproved = value;
 	info.privacyOption = static_cast<uint32_t>(privacyOption);
-	info.rejectionReason = "";
+	info.rejectionReason = rejectionReason;
 
 	Database::Get()->UpdatePropertyModerationInfo(info);
 }
@@ -661,8 +704,9 @@ void PropertyManagementComponent::Save() {
 			Database::Get()->AddBehavior(info);
 		}
 
-		const auto position = entity->GetPosition();
-		const auto rotation = entity->GetRotation();
+		// Always save the original position so we can move the model freely
+		const auto& position = modelComponent->GetOriginalPosition();
+		const auto& rotation = modelComponent->GetOriginalRotation();
 
 		if (std::find(present.begin(), present.end(), id) == present.end()) {
 			IPropertyContents::Model model;
@@ -688,6 +732,10 @@ void PropertyManagementComponent::Save() {
 
 		Database::Get()->RemoveModel(model.id);
 	}
+	IProperty::Info info;
+	info.id = propertyId;
+	info.lastUpdatedTime = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+	Database::Get()->UpdateLastSave(info);
 }
 
 void PropertyManagementComponent::AddModel(LWOOBJID modelId, LWOOBJID spawnerId) {
@@ -768,4 +816,15 @@ void PropertyManagementComponent::SetOwnerId(const LWOOBJID value) {
 
 const std::map<LWOOBJID, LWOOBJID>& PropertyManagementComponent::GetModels() const {
 	return models;
+}
+
+void PropertyManagementComponent::OnChatMessageReceived(const std::string& sMessage) const {
+	for (const auto& modelID : models | std::views::keys) {
+		auto* const model = Game::entityManager->GetEntity(modelID);
+		if (!model) continue;
+		auto* const modelComponent = model->GetComponent<ModelComponent>();
+		if (!modelComponent) continue;
+		
+		modelComponent->OnChatMessageReceived(sMessage);
+	}
 }

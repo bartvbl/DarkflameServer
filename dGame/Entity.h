@@ -2,6 +2,7 @@
 
 #include <map>
 #include <functional>
+#include <tuple>
 #include <typeinfo>
 #include <type_traits>
 #include <unordered_map>
@@ -11,6 +12,19 @@
 #include "NiQuaternion.h"
 #include "LDFFormat.h"
 #include "eKillType.h"
+#include "Observable.h"
+
+namespace GameMessages {
+	struct GameMsg;
+	struct ActivityNotify;
+	struct ShootingGalleryFire;
+	struct ChildLoaded;
+	struct PlayerResurrectionFinished;
+};
+
+namespace MessageType {
+	enum class Game : uint16_t;
+}
 
 namespace Loot {
 	class Info;
@@ -21,7 +35,6 @@ namespace tinyxml2 {
 };
 
 class Player;
-class EntityInfo;
 class User;
 class Spawner;
 class ScriptComponent;
@@ -32,6 +45,7 @@ class Item;
 class Character;
 class EntityCallbackTimer;
 class PositionUpdate;
+struct EntityInfo;
 enum class eTriggerEventType;
 enum class eGameMasterLevel : uint8_t;
 enum class eReplicaComponentType : uint32_t;
@@ -47,7 +61,7 @@ namespace CppScripts {
  */
 class Entity {
 public:
-	explicit Entity(const LWOOBJID& objectID, EntityInfo info, User* parentUser = nullptr, Entity* parentEntity = nullptr);
+	Entity(const LWOOBJID& objectID, const EntityInfo& info, User* parentUser = nullptr, Entity* parentEntity = nullptr);
 	~Entity();
 
 	void Initialize();
@@ -100,11 +114,18 @@ public:
 
 	float GetDefaultScale() const;
 
-	const NiPoint3& GetPosition() const;
+	NiPoint3 GetPosition() const;
 
 	const NiQuaternion& GetRotation() const;
 
 	const SystemAddress& GetSystemAddress() const;
+
+	// Returns the collision group for this entity.
+	// Because the collision group is stored on a base component, this will look for a physics component
+	// then return the collision group from that.
+	int32_t GetCollisionGroup() const;
+
+	const NiPoint3& GetVelocity() const;
 
 	/**
 	 * Setters
@@ -126,9 +147,11 @@ public:
 
 	void SetRotation(const NiQuaternion& rotation);
 
-	void SetRespawnPos(const NiPoint3& position);
+	void SetRespawnPos(const NiPoint3& position) const;
 
-	void SetRespawnRot(const NiQuaternion& rotation);
+	void SetRespawnRot(const NiQuaternion& rotation) const;
+
+	void SetVelocity(const NiPoint3& velocity);
 
 	/**
 	 * Component management
@@ -139,6 +162,12 @@ public:
 	template<typename T>
 	T* GetComponent() const;
 
+	template<typename... T>
+	auto GetComponents() const;
+
+	template<typename... T>
+	auto GetComponentsMut() const;
+
 	template<typename T>
 	bool TryGetComponent(eReplicaComponentType componentId, T*& component) const;
 
@@ -147,7 +176,7 @@ public:
 	void AddComponent(eReplicaComponentType componentId, Component* component);
 
 	// This is expceted to never return nullptr, an assert checks this.
-	CppScripts::Script* const GetScript();
+	CppScripts::Script* const GetScript() const;
 
 	void Subscribe(LWOOBJID scriptObjId, CppScripts::Script* scriptToAdd, const std::string& notificationName);
 	void Unsubscribe(LWOOBJID scriptObjId, const std::string& notificationName);
@@ -160,8 +189,8 @@ public:
 	void RemoveParent();
 
 	// Adds a timer to start next frame with the given name and time.
-	void AddTimer(std::string name, float time);
-	void AddCallbackTimer(float time, std::function<void()> callback);
+	void AddTimer(const std::string& name, float time);
+	void AddCallbackTimer(float time, const std::function<void()> callback);
 	bool HasTimer(const std::string& name);
 	void CancelCallbackTimers();
 	void CancelAllTimers();
@@ -173,7 +202,7 @@ public:
 	std::unordered_map<eReplicaComponentType, Component*>& GetComponents() { return m_Components; } // TODO: Remove
 
 	void WriteBaseReplicaData(RakNet::BitStream& outBitStream, eReplicaPacketType packetType);
-	void WriteComponents(RakNet::BitStream& outBitStream, eReplicaPacketType packetType);
+	void WriteComponents(RakNet::BitStream& outBitStream, eReplicaPacketType packetType) const;
 	void UpdateXMLDoc(tinyxml2::XMLDocument& doc);
 	void Update(float deltaTime);
 
@@ -204,6 +233,10 @@ public:
 	void OnZonePropertyModelRemoved(Entity* player);
 	void OnZonePropertyModelRemovedWhileEquipped(Entity* player);
 	void OnZonePropertyModelRotated(Entity* player);
+	void OnActivityNotify(GameMessages::ActivityNotify& notify);
+	void OnShootingGalleryFire(GameMessages::ShootingGalleryFire& notify);
+	void OnChildLoaded(GameMessages::ChildLoaded& childLoaded);
+	void NotifyPlayerResurrectionFinished(GameMessages::PlayerResurrectionFinished& msg);
 
 	void OnMessageBoxResponse(Entity* sender, int32_t button, const std::u16string& identifier, const std::u16string& userData);
 	void OnChoiceBoxResponse(Entity* sender, int32_t button, const std::u16string& buttonIdentifier, const std::u16string& identifier);
@@ -216,21 +249,21 @@ public:
 	void AddDieCallback(const std::function<void()>& callback);
 	void Resurrect();
 
-	void AddLootItem(const Loot::Info& info);
-	void PickupItem(const LWOOBJID& objectID);
+	void AddLootItem(const Loot::Info& info) const;
+	void PickupItem(const LWOOBJID& objectID) const;
 
-	bool CanPickupCoins(uint64_t count);
-	void RegisterCoinDrop(uint64_t count);
+	bool PickupCoins(uint64_t count) const;
+	void RegisterCoinDrop(uint64_t count) const;
 
 	void ScheduleKillAfterUpdate(Entity* murderer = nullptr);
-	void TriggerEvent(eTriggerEventType event, Entity* optionalTarget = nullptr);
+	void TriggerEvent(eTriggerEventType event, Entity* optionalTarget = nullptr) const;
 	void ScheduleDestructionAfterUpdate() { m_ShouldDestroyAfterUpdate = true; }
 
 	const NiPoint3& GetRespawnPosition() const;
 	const NiQuaternion& GetRespawnRotation() const;
 
-	void Sleep();
-	void Wake();
+	void Sleep() const;
+	void Wake() const;
 	bool IsSleeping() const;
 
 	/*
@@ -240,7 +273,7 @@ public:
 	  * Retroactively corrects the model vault size due to incorrect initialization in a previous patch.
 	  *
 	  */
-	void RetroactiveVaultSize();
+	void RetroactiveVaultSize() const;
 	bool GetBoolean(const std::u16string& name) const;
 	int32_t GetI32(const std::u16string& name) const;
 	int64_t GetI64(const std::u16string& name) const;
@@ -299,7 +332,17 @@ public:
 	// Scale will only be communicated to the client when the construction packet is sent
 	void SetScale(const float scale) { m_Scale = scale; };
 
-protected:
+	void RegisterMsg(const MessageType::Game msgId, std::function<bool(GameMessages::GameMsg&)> handler);
+
+	bool HandleMsg(GameMessages::GameMsg& msg) const;
+
+	/**
+	 * @brief The observable for player entity position updates.
+	 */
+	static Observable<Entity*, const PositionUpdate&> OnPlayerPositionUpdate;
+
+private:
+	void WriteLDFData(const std::vector<LDFBaseData*>& ldf, RakNet::BitStream& outBitStream) const;
 	LWOOBJID m_ObjectID;
 
 	LOT m_TemplateID;
@@ -322,7 +365,6 @@ protected:
 	Entity* m_ParentEntity; //For spawners and the like
 	std::vector<Entity*> m_ChildEntities;
 	eGameMasterLevel m_GMLevel;
-	uint16_t m_CollectibleID;
 	std::vector<std::string> m_Groups;
 	uint16_t m_NetworkID;
 	std::vector<std::function<void()>> m_DieCallbacks;
@@ -348,10 +390,17 @@ protected:
 
 	bool m_IsParentChildDirty = true;
 
+	bool m_IsSleeping = false;
+
 	/*
 	 * Collision
 	 */
 	std::vector<LWOOBJID> m_TargetsInPhantom;
+
+	// objectID of receiver and map of notification name to script
+	std::map<LWOOBJID, std::map<std::string, CppScripts::Script*>> m_Subscriptions;
+
+	std::unordered_multimap<MessageType::Game, std::function<bool(GameMessages::GameMsg&)>> m_MsgHandlers;
 };
 
 /**
@@ -399,7 +448,7 @@ const T& Entity::GetVar(const std::u16string& name) const {
 template<typename T>
 T Entity::GetVarAs(const std::u16string& name) const {
 	const auto data = GetVarAsString(name);
-	
+
 	return GeneralUtils::TryParse<T>(data).value_or(LDFData<T>::Default);
 }
 
@@ -536,4 +585,14 @@ inline ComponentType* Entity::AddComponent(VaArgs... args) {
 	// Because of the assert above, this should always be a ComponentType* but I need a way to guarantee the map cannot be modifed outside this function
 	// To allow a static cast here instead of a dynamic one.
 	return dynamic_cast<ComponentType*>(componentToReturn);
+}
+
+template<typename... T>
+auto Entity::GetComponents() const {
+	return GetComponentsMut<const T...>();
+}
+
+template<typename... T>
+auto Entity::GetComponentsMut() const {
+	return std::tuple{GetComponent<T>()...};
 }

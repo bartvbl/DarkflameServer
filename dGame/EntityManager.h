@@ -9,10 +9,14 @@
 #include "dCommonVars.h"
 
 class Entity;
-class EntityInfo;
+struct EntityInfo;
 class Player;
 class User;
 enum class eReplicaComponentType : uint32_t;
+
+namespace GameMessages {
+	struct GameMsg;
+}
 
 struct SystemAddress;
 
@@ -42,7 +46,7 @@ public:
 	const std::unordered_map<LWOOBJID, Entity*> GetAllEntities() const { return m_Entities; }
 #endif
 
-	void ConstructEntity(Entity* entity, const SystemAddress& sysAddr = UNASSIGNED_SYSTEM_ADDRESS, bool skipChecks = false);
+	void ConstructEntity(Entity* entity, const SystemAddress& sysAddr = UNASSIGNED_SYSTEM_ADDRESS);
 	void DestructEntity(Entity* entity, const SystemAddress& sysAddr = UNASSIGNED_SYSTEM_ADDRESS);
 	void SerializeEntity(Entity* entity);
 	void SerializeEntity(const Entity& entity);
@@ -54,7 +58,7 @@ public:
 	void SetGhostDistanceMin(float value);
 	void QueueGhostUpdate(LWOOBJID playerID);
 	void UpdateGhosting();
-	void UpdateGhosting(Entity* player);
+	void UpdateGhosting(Entity* player, const bool constructAll = false);
 	void CheckGhosting(Entity* entity);
 	Entity* GetGhostCandidate(LWOOBJID id) const;
 	bool GetGhostingEnabled() const;
@@ -71,6 +75,9 @@ public:
 	const uint32_t GetHardcoreLoseUscoreOnDeathPercent() { return m_HardcoreLoseUscoreOnDeathPercent; };
 	const bool GetHardcoreDropinventoryOnDeath() { return m_HardcoreDropinventoryOnDeath; };
 	const uint32_t GetHardcoreUscoreEnemiesMultiplier() { return m_HardcoreUscoreEnemiesMultiplier; };
+
+	// Messaging
+	bool SendMessage(GameMessages::GameMsg& msg) const;
 
 private:
 	void SerializeEntities();

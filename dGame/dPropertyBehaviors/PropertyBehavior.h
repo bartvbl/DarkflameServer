@@ -10,13 +10,15 @@ namespace tinyxml2 {
 enum class BehaviorState : uint32_t;
 
 class AMFArrayValue;
+class BehaviorMessageBase;
+class ModelComponent;
 
 /**
  * Represents the Entity of a Property Behavior and holds data associated with the behavior
  */
 class PropertyBehavior {
 public:
-	PropertyBehavior();
+	PropertyBehavior(bool _isTemplated = false);
 
 	template <typename Msg>
 	void HandleMsg(Msg& msg);
@@ -25,13 +27,25 @@ public:
 	void VerifyLastEditedState();
 	void SendBehaviorListToClient(AMFArrayValue& args) const;
 	void SendBehaviorBlocksToClient(AMFArrayValue& args) const;
+	void CheckModifyState(BehaviorMessageBase& msg);
 
-	[[nodiscard]] int32_t GetBehaviorId() const noexcept { return m_BehaviorId; }
-	void SetBehaviorId(int32_t id) noexcept { m_BehaviorId = id; }
+	[[nodiscard]] LWOOBJID GetBehaviorId() const noexcept { return m_BehaviorId; }
+	void SetBehaviorId(LWOOBJID id) noexcept { m_BehaviorId = id; }
+
+	bool GetIsLoot() const noexcept { return isLoot; }
+	void SetIsLoot(const bool val) noexcept { isLoot = val; }
+
+	const std::string& GetName() const noexcept { return m_Name; }
 
 	void Serialize(tinyxml2::XMLElement& behavior) const;
 	void Deserialize(const tinyxml2::XMLElement& behavior);
+
+	void Update(float deltaTime, ModelComponent& modelComponent);
+	void OnChatMessageReceived(const std::string& sMessage);
+
 private:
+	// The current active behavior state. Behaviors can only be in ONE state at a time.
+	BehaviorState m_ActiveState;
 
 	// The states this behavior has.
 	std::map<BehaviorState, State> m_States;
@@ -45,13 +59,16 @@ private:
 	// Whether this behavior is custom or pre-fab.
 	bool isLoot = false;
 
+	// Whether or not the behavior has been modified from its original state.
+	bool isTemplated;
+
 	// The last state that was edited. This is used so when the client re-opens the behavior editor, it will open to the last edited state.
 	// If the last edited state has no strips, it will open to the first state that has strips.
 	BehaviorState m_LastEditedState;
 
 	// The behavior id for this behavior. This is expected to be fully unique, however an id of -1 means this behavior was just created
 	// and needs to be assigned an id.
-	int32_t m_BehaviorId = -1;
+	LWOOBJID m_BehaviorId = -1;
 };
 
 #endif  //!__PROPERTYBEHAVIOR__H__

@@ -99,7 +99,7 @@ Entity* EntityManager::CreateEntity(EntityInfo info, User* user, Entity* parentE
 		}
 
 		// Exclude the zone control object from any flags
-		if (!controller && info.lot != 14) {
+		if (!controller) {
 
 			// The client flags means the client should render the entity
 			GeneralUtils::SetBit(id, eObjectBits::CLIENT);
@@ -320,7 +320,7 @@ const std::unordered_map<std::string, LWOOBJID>& EntityManager::GetSpawnPointEnt
 	return m_SpawnPoints;
 }
 
-void EntityManager::ConstructEntity(Entity* entity, const SystemAddress& sysAddr, const bool skipChecks) {
+void EntityManager::ConstructEntity(Entity* entity, const SystemAddress& sysAddr) {
 	if (!entity) {
 		LOG("Attempted to construct null entity");
 		return;
@@ -363,16 +363,14 @@ void EntityManager::ConstructEntity(Entity* entity, const SystemAddress& sysAddr
 	entity->WriteComponents(stream, eReplicaPacketType::CONSTRUCTION);
 
 	if (sysAddr == UNASSIGNED_SYSTEM_ADDRESS) {
-		if (skipChecks) {
-			Game::server->Send(stream, UNASSIGNED_SYSTEM_ADDRESS, true);
-		} else {
-			for (auto* player : PlayerManager::GetAllPlayers()) {
-				if (player->GetPlayerReadyForUpdates()) {
-					Game::server->Send(stream, player->GetSystemAddress(), false);
-				} else {
-					auto* ghostComponent = player->GetComponent<GhostComponent>();
-					if (ghostComponent) ghostComponent->AddLimboConstruction(entity->GetObjectID());
-				}
+		for (auto* player : PlayerManager::GetAllPlayers()) {
+			// Don't need to construct the player to themselves 
+			if (entity->GetObjectID() == player->GetObjectID()) continue;
+			if (player->GetPlayerReadyForUpdates()) {
+				Game::server->Send(stream, player->GetSystemAddress(), false);
+			} else {
+				auto* ghostComponent = player->GetComponent<GhostComponent>();
+				if (ghostComponent) ghostComponent->AddLimboConstruction(entity->GetObjectID());
 			}
 		}
 	} else {
@@ -396,7 +394,7 @@ void EntityManager::ConstructAllEntities(const SystemAddress& sysAddr) {
 		}
 	}
 
-	UpdateGhosting(PlayerManager::GetPlayer(sysAddr));
+	UpdateGhosting(PlayerManager::GetPlayer(sysAddr), true);
 }
 
 void EntityManager::DestructEntity(Entity* entity, const SystemAddress& sysAddr) {
@@ -419,7 +417,7 @@ void EntityManager::DestructEntity(Entity* entity, const SystemAddress& sysAddr)
 
 void EntityManager::SerializeEntity(Entity* entity) {
 	if (!entity) return;
-	
+
 	EntityManager::SerializeEntity(*entity);
 }
 
@@ -465,7 +463,7 @@ void EntityManager::UpdateGhosting() {
 	m_PlayersToUpdateGhosting.clear();
 }
 
-void EntityManager::UpdateGhosting(Entity* player) {
+void EntityManager::UpdateGhosting(Entity* player, const bool constructAll) {
 	if (!player) return;
 
 	auto* missionComponent = player->GetComponent<MissionComponent>();
@@ -513,9 +511,12 @@ void EntityManager::UpdateGhosting(Entity* player) {
 
 			ghostComponent->ObserveEntity(id);
 
-			ConstructEntity(entity, player->GetSystemAddress());
-
 			entity->SetObservers(entity->GetObservers() + 1);
+
+			// TODO: figure out if zone control should be ghosted at all
+			if (constructAll && entity->GetObjectID() == GetZoneControlEntity()->GetObjectID()) continue;
+
+			ConstructEntity(entity, player->GetSystemAddress());
 		}
 	}
 }
@@ -603,4 +604,15 @@ void EntityManager::FireEventServerSide(Entity* origin, std::string args) {
 
 bool EntityManager::IsExcludedFromGhosting(LOT lot) {
 	return std::find(m_GhostingExcludedLOTs.begin(), m_GhostingExcludedLOTs.end(), lot) != m_GhostingExcludedLOTs.end();
+}
+
+bool EntityManager::SendMessage(GameMessages::GameMsg& msg) const {
+	bool handled = false;
+	const auto entityItr = m_Entities.find(msg.target);
+	if (entityItr != m_Entities.end()) {
+		auto* const entity = entityItr->second;
+		if (entity) handled = entity->HandleMsg(msg);
+	}
+
+	return handled;
 }

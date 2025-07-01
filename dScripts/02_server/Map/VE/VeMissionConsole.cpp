@@ -6,11 +6,11 @@
 #include "eTerminateType.h"
 
 void VeMissionConsole::OnUse(Entity* self, Entity* user) {
-	Loot::DropActivityLoot(user, self, 12551);
+	Loot::DropActivityLoot(user, self->GetObjectID(), 12551);
 
 	auto* inventoryComponent = user->GetComponent<InventoryComponent>();
 	if (inventoryComponent != nullptr) {
-		inventoryComponent->AddItem(12547, 1, eLootSourceType::ACTIVITY);  // Add the panel required for pickup
+		inventoryComponent->AddItem(12547, 1, eLootSourceType::NONE);  // Add the panel required for pickup
 	}
 
 	// The flag to set is 101<number>

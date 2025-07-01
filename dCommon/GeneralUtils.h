@@ -3,6 +3,7 @@
 // C++
 #include <charconv>
 #include <cstdint>
+#include <cmath> 
 #include <ctime>
 #include <functional>
 #include <optional>
@@ -50,6 +51,14 @@ namespace GeneralUtils {
 		//! Internal, do not use
 		bool _NextUTF8Char(std::string_view& slice, uint32_t& out);
 	}
+
+	//! Converts a Latin1 string to a UTF-8 string
+	/*!
+	  \param string The string to convert
+	  \param size A size to trim the string to. Default is SIZE_MAX (No trimming)
+	  \return An UTF-8 representation of the string
+	 */
+	std::string Latin1ToUTF8(const std::u8string_view string, const size_t size = SIZE_MAX);
 
 	//! Converts a UTF-16 string to a UTF-8 string
 	/*!
@@ -129,6 +138,29 @@ namespace GeneralUtils {
 
 	std::vector<std::string> GetSqlFileNamesFromFolder(const std::string_view folder);
 
+	/**
+	 * Transparent string hasher - used to allow string_view key lookups for maps storing std::string keys
+	 * https://www.reddit.com/r/cpp_questions/comments/12xw3sn/find_stdstring_view_in_unordered_map_with/jhki225/
+	 * https://godbolt.org/z/789xv8Eeq
+	*/
+	template <typename... Bases>
+	struct overload : Bases... {
+		using is_transparent = void;
+		using Bases::operator() ...;
+	};
+
+	struct char_pointer_hash {
+		auto operator()(const char* const ptr) const noexcept {
+			return std::hash<std::string_view>{}(ptr);
+		}
+	};
+
+	using transparent_string_hash = overload<
+		std::hash<std::string>,
+		std::hash<std::string_view>,
+		char_pointer_hash
+	>;
+
 	// Concept constraining to enum types
 	template <typename T>
 	concept Enum = std::is_enum_v<T>;
@@ -170,6 +202,10 @@ namespace GeneralUtils {
 		return isParsed ? static_cast<T>(result) : std::optional<T>{};
 	}
 
+	template<typename T>
+		requires(!Numeric<T>)
+	[[nodiscard]] std::optional<T> TryParse(std::string_view str);
+
 #if !(__GNUC__ >= 11 || _MSC_VER >= 1924)
 
 	// MacOS floating-point parse helper function specializations
@@ -186,7 +222,7 @@ namespace GeneralUtils {
 	*/
 	template <std::floating_point T>
 	[[nodiscard]] std::optional<T> TryParse(std::string_view str) noexcept
-	try {
+		try {
 		while (!str.empty() && std::isspace(str.front())) str.remove_prefix(1);
 
 		size_t parseNum;
@@ -287,5 +323,29 @@ namespace GeneralUtils {
 		static_assert(std::is_arithmetic<T>::value, "Not an arithmetic type");
 
 		return GenerateRandomNumber<T>(std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+	}
+
+	// https://www.quora.com/How-do-you-round-to-specific-increments-like-0-5-in-C
+	// Rounds to the nearest floating point value specified.
+	template <typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+	T RountToNearestEven(const T value, const T modulus) {
+		const auto modulo = std::fmod(value, modulus);
+		const auto abs_modulo_2 = std::abs(modulo * 2);
+		const auto abs_modulus = std::abs(modulus);
+
+		bool round_away_from_zero = false;
+		if (abs_modulo_2 > abs_modulus) {
+			round_away_from_zero = true;
+		} else if (abs_modulo_2 == abs_modulus) {
+			const auto trunc_quot = std::floor(std::abs(value / modulus));
+			const auto odd = std::fmod(trunc_quot, T{ 2 }) != 0;
+			round_away_from_zero = odd;
+		}
+
+		if (round_away_from_zero) {
+			return value + (std::copysign(modulus, value) - modulo);
+		} else {
+			return value - modulo;
+		}
 	}
 }

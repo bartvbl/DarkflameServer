@@ -16,6 +16,11 @@ set(DCOMMON_SOURCES
 		"BrickByBrickFix.cpp"
 		"BinaryPathFinder.cpp"
 		"FdbToSqlite.cpp"
+		"JSONUtils.cpp"
+		"TinyXmlUtils.cpp"
+		"Sd0.cpp"
+		"Lxfml.cpp"
+		"LxfmlBugged.cpp"
 )
 
 # Workaround for compiler bug where the optimized code could result in a memcpy of 0 bytes, even though that isnt possible.
@@ -37,7 +42,6 @@ target_include_directories(dCommon
 	"${PROJECT_SOURCE_DIR}/dDatabase/GameDatabase"
 	"${PROJECT_SOURCE_DIR}/dDatabase/GameDatabase/ITables"
 	"${PROJECT_SOURCE_DIR}/dDatabase/CDClientDatabase"
-	"${PROJECT_SOURCE_DIR}/thirdparty/mariadb-connector-cpp/include"
 )
 
 if (UNIX)

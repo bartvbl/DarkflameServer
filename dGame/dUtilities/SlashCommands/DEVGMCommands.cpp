@@ -45,7 +45,7 @@
 
 // Enums
 #include "eGameMasterLevel.h"
-#include "eMasterMessageType.h"
+#include "MessageType/Master.h"
 #include "eInventoryType.h"
 #include "ePlayerFlag.h"
 
@@ -503,7 +503,7 @@ namespace DEVGMCommands {
 	void ShutdownUniverse(Entity* entity, const SystemAddress& sysAddr, const std::string args) {
 		//Tell the master server that we're going to be shutting down whole "universe":
 		CBITSTREAM;
-		BitStreamUtils::WriteHeader(bitStream, eConnectionType::MASTER, eMasterMessageType::SHUTDOWN_UNIVERSE);
+		BitStreamUtils::WriteHeader(bitStream, eConnectionType::MASTER, MessageType::Master::SHUTDOWN_UNIVERSE);
 		Game::server->SendToMaster(bitStream);
 		ChatPackets::SendSystemMessage(sysAddr, u"Sent universe shutdown notification to master.");
 
@@ -555,25 +555,45 @@ namespace DEVGMCommands {
 		}
 	}
 
+	std::optional<float> ParseRelativeAxis(const float sourcePos, const std::string& toParse) {
+		if (toParse.empty()) return std::nullopt;
+
+		// relative offset from current position
+		if (toParse[0] == '~') {
+			if (toParse.size() == 1) return sourcePos;
+
+			if (toParse.size() < 3 || !(toParse[1] != '+' || toParse[1] != '-')) return std::nullopt;
+
+			const auto offset = GeneralUtils::TryParse<float>(toParse.substr(2));
+			if (!offset.has_value()) return std::nullopt;
+
+			bool isNegative = toParse[1] == '-';
+			return isNegative ? sourcePos - offset.value() : sourcePos + offset.value();
+		}
+
+		return GeneralUtils::TryParse<float>(toParse);
+	}
+
 	void Teleport(Entity* entity, const SystemAddress& sysAddr, const std::string args) {
 		const auto splitArgs = GeneralUtils::SplitString(args, ' ');
 
+		const auto& sourcePos = entity->GetPosition();
 		NiPoint3 pos{};
+		auto* sourceEntity = entity;
 		if (splitArgs.size() == 3) {
-
-			const auto x = GeneralUtils::TryParse<float>(splitArgs.at(0));
+			const auto x = ParseRelativeAxis(sourcePos.x, splitArgs[0]);
 			if (!x) {
 				ChatPackets::SendSystemMessage(sysAddr, u"Invalid x.");
 				return;
 			}
 
-			const auto y = GeneralUtils::TryParse<float>(splitArgs.at(1));
+			const auto y = ParseRelativeAxis(sourcePos.y, splitArgs[1]);
 			if (!y) {
 				ChatPackets::SendSystemMessage(sysAddr, u"Invalid y.");
 				return;
 			}
 
-			const auto z = GeneralUtils::TryParse<float>(splitArgs.at(2));
+			const auto z = ParseRelativeAxis(sourcePos.z, splitArgs[2]);
 			if (!z) {
 				ChatPackets::SendSystemMessage(sysAddr, u"Invalid z.");
 				return;
@@ -584,32 +604,39 @@ namespace DEVGMCommands {
 			pos.SetZ(z.value());
 
 			LOG("Teleporting objectID: %llu to %f, %f, %f", entity->GetObjectID(), pos.x, pos.y, pos.z);
-			GameMessages::SendTeleport(entity->GetObjectID(), pos, NiQuaternion(), sysAddr);
 		} else if (splitArgs.size() == 2) {
+			const auto x = ParseRelativeAxis(sourcePos.x, splitArgs[0]);
+			auto* sourcePlayer = PlayerManager::GetPlayer(splitArgs[0]);
+			if (!x && !sourcePlayer) {
+				ChatPackets::SendSystemMessage(sysAddr, u"Invalid x or source player not found.");
+				return;
+			}
+			if (sourcePlayer) sourceEntity = sourcePlayer;
 
-			const auto x = GeneralUtils::TryParse<float>(splitArgs.at(0));
-			if (!x) {
-				ChatPackets::SendSystemMessage(sysAddr, u"Invalid x.");
+			const auto z = ParseRelativeAxis(sourcePos.z, splitArgs[1]);
+			const auto* const targetPlayer = PlayerManager::GetPlayer(splitArgs[1]);
+			if (!z && !targetPlayer) {
+				ChatPackets::SendSystemMessage(sysAddr, u"Invalid z or target player not found.");
 				return;
 			}
 
-			const auto z = GeneralUtils::TryParse<float>(splitArgs.at(1));
-			if (!z) {
-				ChatPackets::SendSystemMessage(sysAddr, u"Invalid z.");
+			if (x && z) {
+				pos.SetX(x.value());
+				pos.SetY(0.0f);
+				pos.SetZ(z.value());
+			} else if (sourcePlayer && targetPlayer) {
+				pos = targetPlayer->GetPosition();
+			} else {
+				ChatPackets::SendSystemMessage(sysAddr, u"Unable to teleport.");
 				return;
 			}
-
-			pos.SetX(x.value());
-			pos.SetY(0.0f);
-			pos.SetZ(z.value());
-
 			LOG("Teleporting objectID: %llu to X: %f, Z: %f", entity->GetObjectID(), pos.x, pos.z);
-			GameMessages::SendTeleport(entity->GetObjectID(), pos, NiQuaternion(), sysAddr);
 		} else {
 			ChatPackets::SendSystemMessage(sysAddr, u"Correct usage: /teleport <x> (<y>) <z> - if no Y given, will teleport to the height of the terrain (or any physics object).");
 		}
+		GameMessages::SendTeleport(sourceEntity->GetObjectID(), pos, sourceEntity->GetRotation(), sourceEntity->GetSystemAddress());
 
-		auto* possessorComponent = entity->GetComponent<PossessorComponent>();
+		auto* possessorComponent = sourceEntity->GetComponent<PossessorComponent>();
 		if (possessorComponent) {
 			auto* possassableEntity = Game::entityManager->GetEntity(possessorComponent->GetPossessable());
 
@@ -1022,6 +1049,10 @@ namespace DEVGMCommands {
 
 				LOG("Transferring %s to Zone %i (Instance %i | Clone %i | Mythran Shift: %s) with IP %s and Port %i", sysAddr.ToString(), zoneID, zoneInstance, zoneClone, mythranShift == true ? "true" : "false", serverIP.c_str(), serverPort);
 				if (entity->GetCharacter()) {
+					auto* characterComponent = entity->GetComponent<CharacterComponent>();
+					if (characterComponent) {
+						characterComponent->AddVisitedLevel(LWOZONEID(zoneID, LWOINSTANCEID_INVALID, zoneClone));
+					}
 					entity->GetCharacter()->SetZoneID(zoneID);
 					entity->GetCharacter()->SetZoneInstance(zoneInstance);
 					entity->GetCharacter()->SetZoneClone(zoneClone);
@@ -1483,6 +1514,7 @@ namespace DEVGMCommands {
 		}
 
 		if (!closest) return;
+		LOG("%llu", closest->GetObjectID());
 
 		Game::entityManager->SerializeEntity(closest);
 
@@ -1594,5 +1626,24 @@ namespace DEVGMCommands {
 				}
 			}
 		}
+	}
+
+	void Shutdown(Entity* entity, const SystemAddress& sysAddr, const std::string args) {
+		auto* character = entity->GetCharacter();
+		if (character) LOG("Mythran (%s) has shutdown the world", character->GetName().c_str());
+		Game::OnSignal(-1);
+	}
+
+	void Barfight(Entity* entity, const SystemAddress& sysAddr, const std::string args) {
+		auto* const characterComponent = entity->GetComponent<CharacterComponent>();
+		if (!characterComponent) return;
+
+		for (auto* const player : PlayerManager::GetAllPlayers()) {
+			auto* const pCharacterComponent = player->GetComponent<CharacterComponent>();
+			if (pCharacterComponent) pCharacterComponent->SetPvpEnabled(true);
+			Game::entityManager->SerializeEntity(player);
+		}
+		const auto msg = u"Pvp has been turned on for all players by " + GeneralUtils::ASCIIToUTF16(characterComponent->GetName());
+		ChatPackets::SendSystemMessage(UNASSIGNED_SYSTEM_ADDRESS, msg, true);
 	}
 };

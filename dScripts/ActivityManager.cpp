@@ -6,6 +6,7 @@
 #include <algorithm>
 #include "Logger.h"
 #include "Loot.h"
+#include "ShootingGalleryComponent.h"
 
 bool ActivityManager::IsPlayerInActivity(Entity* self, LWOOBJID playerID) {
 	const auto* sac = self->GetComponent<ScriptedActivityComponent>();
@@ -71,7 +72,7 @@ void ActivityManager::StopActivity(Entity* self, const LWOOBJID playerID, const 
 		SetActivityValue(self, playerID, 1, value1);
 		SetActivityValue(self, playerID, 2, value2);
 
-		Loot::GiveActivityLoot(player, self, gameID, CalculateActivityRating(self, playerID));
+		Loot::GiveActivityLoot(player, self->GetObjectID(), gameID, CalculateActivityRating(self, playerID));
 
 		if (sac != nullptr) {
 			sac->PlayerRemove(player->GetObjectID());
@@ -93,15 +94,16 @@ void ActivityManager::SaveScore(Entity* self, const LWOOBJID playerID, const flo
 }
 
 bool ActivityManager::TakeActivityCost(const Entity* self, const LWOOBJID playerID) {
-	auto* sac = self->GetComponent<ScriptedActivityComponent>();
-	if (sac == nullptr)
-		return false;
+	ActivityComponent* activityComponent = self->GetComponent<ScriptedActivityComponent>();
+	if (activityComponent == nullptr) {
+		activityComponent = self->GetComponent<ShootingGalleryComponent>();
+	}
 
 	auto* player = Game::entityManager->GetEntity(playerID);
 	if (player == nullptr)
 		return false;
 
-	return sac->TakeCost(player);
+	return activityComponent->TakeCost(player);
 }
 
 uint32_t ActivityManager::CalculateActivityRating(Entity* self, const LWOOBJID playerID) {
@@ -121,7 +123,7 @@ void ActivityManager::GetLeaderboardData(Entity* self, const LWOOBJID playerID, 
 	auto* sac = self->GetComponent<ScriptedActivityComponent>();
 	uint32_t gameID = sac != nullptr ? sac->GetActivityID() : self->GetLOT();
 	// Save the new score to the leaderboard and show the leaderboard to the player
-	LeaderboardManager::SendLeaderboard(activityID, Leaderboard::InfoType::MyStanding, false, playerID, self->GetObjectID(), 0, numResults);
+	LeaderboardManager::SendLeaderboard(activityID, Leaderboard::InfoType::MyStanding, false, playerID, self->GetObjectID(), numResults);
 }
 
 void ActivityManager::ActivityTimerStart(Entity* self, const std::string& timerName, const float_t updateInterval,
@@ -163,7 +165,7 @@ int32_t ActivityManager::GetGameID(Entity* self) const {
 
 float_t ActivityManager::ActivityTimerGetRemainingTime(Entity* self, const std::string& timerName) const {
 	auto* timer = GetTimer(timerName);
-	return timer != nullptr ? std::min(timer->stopTime - timer->runTime, 0.0f) : 0.0f;
+	return timer != nullptr ? std::max(timer->stopTime - timer->runTime, 0.0f) : 0.0f;
 }
 
 void ActivityManager::ActivityTimerReset(Entity* self, const std::string& timerName) {

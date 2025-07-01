@@ -3,13 +3,14 @@
 #ifndef __DCOMMONVARS__H__
 #define __DCOMMONVARS__H__
 
+#include <compare>
 #include <cstdint>
-#include <string>
 #include <set>
+#include <string>
 #include "BitStream.h"
-#include "eConnectionType.h"
-#include "eClientMessageType.h"
 #include "BitStreamUtils.h"
+#include "MessageType/Client.h"
+#include "eConnectionType.h"
 
 #pragma warning (disable:4251) //Disables SQL warnings
 
@@ -33,7 +34,7 @@ constexpr uint32_t lowFrameDelta = FRAMES_TO_MS(lowFramerate);
 #define CBITSTREAM RakNet::BitStream bitStream;
 #define CINSTREAM RakNet::BitStream inStream(packet->data, packet->length, false);
 #define CINSTREAM_SKIP_HEADER CINSTREAM if (inStream.GetNumberOfUnreadBits() >= BYTES_TO_BITS(HEADER_SIZE)) inStream.IgnoreBytes(HEADER_SIZE); else inStream.IgnoreBits(inStream.GetNumberOfUnreadBits());
-#define CMSGHEADER BitStreamUtils::WriteHeader(bitStream, eConnectionType::CLIENT, eClientMessageType::GAME_MSG);
+#define CMSGHEADER BitStreamUtils::WriteHeader(bitStream, eConnectionType::CLIENT, MessageType::Client::GAME_MSG);
 #define SEND_PACKET Game::server->Send(bitStream, sysAddr, false);
 #define SEND_PACKET_BROADCAST Game::server->Send(bitStream, UNASSIGNED_SYSTEM_ADDRESS, true);
 
@@ -98,6 +99,8 @@ public:
 	constexpr LWOZONEID() noexcept = default;
 	constexpr LWOZONEID(const LWOMAPID& mapID, const LWOINSTANCEID& instanceID, const LWOCLONEID& cloneID) noexcept { m_MapID = mapID; m_InstanceID = instanceID; m_CloneID = cloneID; }
 	constexpr LWOZONEID(const LWOZONEID& replacement) noexcept { *this = replacement; }
+	constexpr bool operator==(const LWOZONEID&) const = default;
+	constexpr auto operator<=>(const LWOZONEID&) const = default;
 
 private:
 	LWOMAPID m_MapID = LWOMAPID_INVALID; //1000 for VE, 1100 for AG, etc...

@@ -10,6 +10,7 @@
 #include "tinyxml2.h"
 #include "eReplicaComponentType.h"
 #include <array>
+#include <set>
 #include "Loot.h"
 
 enum class eGameActivity : uint32_t;
@@ -25,6 +26,8 @@ struct ZoneStatistics {
 	uint64_t m_CoinsCollected;
 	uint64_t m_EnemiesSmashed;
 	uint64_t m_QuickBuildsCompleted;
+
+	bool operator==(const ZoneStatistics& rhs) const = default;
 };
 
 /**
@@ -279,9 +282,9 @@ public:
 	 */
 	void UpdateClientMinimap(bool showFaction, std::string ventureVisionType) const;
 
-	void SetCurrentInteracting(LWOOBJID objectID) {m_CurrentInteracting = objectID;};
+	void SetCurrentInteracting(LWOOBJID objectID) { m_CurrentInteracting = objectID; };
 
-	LWOOBJID GetCurrentInteracting() {return m_CurrentInteracting;};
+	LWOOBJID GetCurrentInteracting() { return m_CurrentInteracting; };
 
 	/**
 	 * Sends a player to another zone with an optional clone ID
@@ -307,11 +310,28 @@ public:
 
 	void SetDroppedCoins(const uint64_t value) { m_DroppedCoins = value; };
 
+	const std::array<uint64_t, 4>& GetClaimCodes() const { return m_ClaimCodes; };
+
+	const std::map<LWOMAPID, ZoneStatistics>& GetZoneStatistics() const { return m_ZoneStatistics; };
+
+	const std::u16string& GetLastRocketConfig() const { return m_LastRocketConfig; };
+
+	uint64_t GetTotalTimePlayed() const { return m_TotalTimePlayed; };
+
 	/**
 	 * Character info regarding this character, including clothing styles, etc.
 	 */
 	Character* m_Character;
+
+	/* Saves the provided zoneID as a visited level. Ignores InstanceID */
+	void AddVisitedLevel(const LWOZONEID zoneID);
+	/* Updates the VisitedLevels (vl) node of the charxml */
+	void UpdateVisitedLevelsXml(tinyxml2::XMLElement& doc);
+	/* Reads the VisitedLevels (vl) node of the charxml */
+	void LoadVisitedLevelsXml(const tinyxml2::XMLElement& doc);
 private:
+
+	bool OnRequestServerObjectInfo(GameMessages::GameMsg& msg);
 
 	/**
 	 * The map of active venture vision effects
@@ -607,6 +627,8 @@ private:
 	std::map<LWOOBJID, Loot::Info> m_DroppedLoot;
 
 	uint64_t m_DroppedCoins = 0;
+
+	std::set<LWOZONEID> m_VisitedLevels;
 };
 
 #endif // CHARACTERCOMPONENT_H

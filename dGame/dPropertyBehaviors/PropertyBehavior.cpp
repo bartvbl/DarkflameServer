@@ -4,9 +4,16 @@
 #include "BehaviorStates.h"
 #include "ControlBehaviorMsgs.h"
 #include "tinyxml2.h"
+#include "ModelComponent.h"
 
-PropertyBehavior::PropertyBehavior() {
+#include <ranges>
+
+PropertyBehavior::PropertyBehavior(bool _isTemplated) {
 	m_LastEditedState = BehaviorState::HOME_STATE;
+	m_ActiveState = BehaviorState::HOME_STATE;
+
+	// Starts off as true so that only specific ways of adding behaviors allow a new id to be requested.
+	isTemplated = _isTemplated;
 }
 
 template<>
@@ -78,11 +85,21 @@ void PropertyBehavior::HandleMsg(RenameMessage& msg) {
 };
 
 template<>
-void PropertyBehavior::HandleMsg(AddMessage& msg) {
-	// TODO Parse the corresponding behavior xml file.
-	m_BehaviorId = msg.GetBehaviorId();
-	isLoot = m_BehaviorId != 7965;
-};
+void PropertyBehavior::HandleMsg(GameMessages::RequestUse& msg) {
+	m_States[m_ActiveState].HandleMsg(msg);
+}
+
+template<>
+void PropertyBehavior::HandleMsg(GameMessages::ResetModelToDefaults& msg) {
+	m_ActiveState = BehaviorState::HOME_STATE;
+	for (auto& state : m_States | std::views::values) state.HandleMsg(msg);
+}
+
+void PropertyBehavior::CheckModifyState(BehaviorMessageBase& msg) {
+	if (!isTemplated && m_BehaviorId != BehaviorMessageBase::DefaultBehaviorId) return;
+	isTemplated = false;
+	msg.SetNeedsNewBehaviorID(true);
+}
 
 void PropertyBehavior::SendBehaviorListToClient(AMFArrayValue& args) const {
 	args.Insert("id", std::to_string(m_BehaviorId));
@@ -132,6 +149,9 @@ void PropertyBehavior::Serialize(tinyxml2::XMLElement& behavior) const {
 	behavior.SetAttribute("isLocked", isLocked);
 	behavior.SetAttribute("isLoot", isLoot);
 
+	// CUSTOM XML ATTRIBUTE
+	behavior.SetAttribute("isTemplated", isTemplated);
+
 	for (const auto& [stateId, state] : m_States) {
 		if (state.IsEmpty()) continue;
 		auto* const stateElement = behavior.InsertNewChildElement("State");
@@ -146,10 +166,21 @@ void PropertyBehavior::Deserialize(const tinyxml2::XMLElement& behavior) {
 	behavior.QueryBoolAttribute("isLocked", &isLocked);
 	behavior.QueryBoolAttribute("isLoot", &isLoot);
 
+	// CUSTOM XML ATTRIBUTE
+	if (!isTemplated) behavior.QueryBoolAttribute("isTemplated", &isTemplated);
+
 	for (const auto* stateElement = behavior.FirstChildElement("State"); stateElement; stateElement = stateElement->NextSiblingElement("State")) {
 		int32_t stateId = -1;
 		stateElement->QueryIntAttribute("id", &stateId);
 		if (stateId < 0 || stateId > 5) continue;
 		m_States[static_cast<BehaviorState>(stateId)].Deserialize(*stateElement);
 	}
+}
+
+void PropertyBehavior::Update(float deltaTime, ModelComponent& modelComponent) {
+	for (auto& state : m_States | std::views::values) state.Update(deltaTime, modelComponent);
+}
+
+void PropertyBehavior::OnChatMessageReceived(const std::string& sMessage) {
+	for (auto& state : m_States | std::views::values) state.OnChatMessageReceived(sMessage);
 }

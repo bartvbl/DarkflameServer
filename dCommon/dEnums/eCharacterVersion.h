@@ -15,7 +15,10 @@ enum class eCharacterVersion : uint32_t {
 	// Fixes vault size value
 	VAULT_SIZE,
 	// Fixes speed base value in level component
-	UP_TO_DATE, // will become SPEED_BASE
+	SPEED_BASE,
+	// Fixes nexus force explorer missions
+	NJ_JAYMISSIONS,
+	UP_TO_DATE, // will become NEXUS_FORCE_EXPLORER
 };
 
 #endif  //!__ECHARACTERVERSION__H__

@@ -38,6 +38,9 @@
 
 #include "CDComponentsRegistryTable.h"
 
+Implementation<bool, const Entity*> DestroyableComponent::IsEnemyImplentation;
+Implementation<bool, const Entity*> DestroyableComponent::IsFriendImplentation;
+
 DestroyableComponent::DestroyableComponent(Entity* parent) : Component(parent) {
 	m_iArmor = 0;
 	m_fMaxArmor = 0.0f;
@@ -418,6 +421,7 @@ void DestroyableComponent::AddFaction(const int32_t factionID, const bool ignore
 }
 
 bool DestroyableComponent::IsEnemy(const Entity* other) const {
+	if (IsEnemyImplentation.ExecuteWithDefault(other, false)) return true;
 	if (m_Parent->IsPlayer() && other->IsPlayer()) {
 		auto* thisCharacterComponent = m_Parent->GetComponent<CharacterComponent>();
 		if (!thisCharacterComponent) return false;
@@ -440,6 +444,7 @@ bool DestroyableComponent::IsEnemy(const Entity* other) const {
 }
 
 bool DestroyableComponent::IsFriend(const Entity* other) const {
+	if (IsFriendImplentation.ExecuteWithDefault(other, false)) return true;
 	const auto* otherDestroyableComponent = other->GetComponent<DestroyableComponent>();
 	if (otherDestroyableComponent != nullptr) {
 		for (const auto enemyFaction : m_EnemyFactionIDs) {
@@ -750,18 +755,18 @@ void DestroyableComponent::Smash(const LWOOBJID source, const eKillType killType
 
 					auto* member = Game::entityManager->GetEntity(specificOwner);
 
-					if (member) Loot::DropLoot(member, m_Parent, lootMatrixId, GetMinCoins(), GetMaxCoins());
+					if (member) Loot::DropLoot(member, m_Parent->GetObjectID(), lootMatrixId, GetMinCoins(), GetMaxCoins());
 				} else {
 					for (const auto memberId : team->members) { // Free for all
 						auto* member = Game::entityManager->GetEntity(memberId);
 
 						if (member == nullptr) continue;
 
-						Loot::DropLoot(member, m_Parent, lootMatrixId, GetMinCoins(), GetMaxCoins());
+						Loot::DropLoot(member, m_Parent->GetObjectID(), lootMatrixId, GetMinCoins(), GetMaxCoins());
 					}
 				}
 			} else { // drop loot for non team user
-				Loot::DropLoot(owner, m_Parent, GetLootMatrixID(), GetMinCoins(), GetMaxCoins());
+				Loot::DropLoot(owner, m_Parent->GetObjectID(), GetLootMatrixID(), GetMinCoins(), GetMaxCoins());
 			}
 		}
 	} else {
@@ -769,17 +774,17 @@ void DestroyableComponent::Smash(const LWOOBJID source, const eKillType killType
 		if (Game::zoneManager->GetPlayerLoseCoinOnDeath()) {
 			auto* character = m_Parent->GetCharacter();
 			uint64_t coinsTotal = character->GetCoins();
-			const uint64_t minCoinsToLose = Game::zoneManager->GetWorldConfig()->coinsLostOnDeathMin;
+			const uint64_t minCoinsToLose = Game::zoneManager->GetWorldConfig().coinsLostOnDeathMin;
 			if (coinsTotal >= minCoinsToLose) {
-				const uint64_t maxCoinsToLose = Game::zoneManager->GetWorldConfig()->coinsLostOnDeathMax;
-				const float coinPercentageToLose = Game::zoneManager->GetWorldConfig()->coinsLostOnDeathPercent;
+				const uint64_t maxCoinsToLose = Game::zoneManager->GetWorldConfig().coinsLostOnDeathMax;
+				const float coinPercentageToLose = Game::zoneManager->GetWorldConfig().coinsLostOnDeathPercent;
 
 				uint64_t coinsToLose = std::max(static_cast<uint64_t>(coinsTotal * coinPercentageToLose), minCoinsToLose);
 				coinsToLose = std::min(maxCoinsToLose, coinsToLose);
 
 				coinsTotal -= coinsToLose;
 
-				Loot::DropLoot(m_Parent, m_Parent, -1, coinsToLose, coinsToLose);
+				Loot::DropLoot(m_Parent, m_Parent->GetObjectID(), -1, coinsToLose, coinsToLose);
 				character->SetCoins(coinsTotal, eLootSourceType::PICKUP);
 			}
 		}

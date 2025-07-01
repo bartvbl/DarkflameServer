@@ -7,6 +7,7 @@
 #include "GameDatabase.h"
 
 typedef std::unique_ptr<sql::PreparedStatement>& UniquePreppedStmtRef;
+typedef std::unique_ptr<sql::ResultSet> UniqueResultSet;
 
 // Purposefully no definition for this to provide linker errors in the case someone tries to
 // bind a parameter to a type that isn't defined.
@@ -29,7 +30,6 @@ public:
 	void Connect() override;
 	void Destroy(std::string source = "") override;
 
-	sql::PreparedStatement* CreatePreppedStmt(const std::string& query) override;
 	void Commit() override;
 	bool GetAutoCommit() override;
 	void SetAutoCommit(bool value) override;
@@ -48,7 +48,7 @@ public:
 	void RemoveFriend(const uint32_t playerAccountId, const uint32_t friendAccountId) override;
 	void UpdateActivityLog(const uint32_t characterId, const eActivityType activityType, const LWOMAPID mapId) override;
 	void DeleteUgcModelData(const LWOOBJID& modelId) override;
-	void UpdateUgcModelData(const LWOOBJID& modelId, std::istringstream& lxfml) override;
+	void UpdateUgcModelData(const LWOOBJID& modelId, std::stringstream& lxfml) override;
 	std::vector<IUgc::Model> GetAllUgcModels() override;
 	void CreateMigrationHistoryTable() override;
 	bool IsMigrationRun(const std::string_view str) override;
@@ -70,23 +70,24 @@ public:
 	std::optional<IProperty::Info> GetPropertyInfo(const LWOMAPID mapId, const LWOCLONEID cloneId) override;
 	void UpdatePropertyModerationInfo(const IProperty::Info& info) override;
 	void UpdatePropertyDetails(const IProperty::Info& info) override;
+	void UpdateLastSave(const IProperty::Info& info) override;
 	void InsertNewProperty(const IProperty::Info& info, const uint32_t templateId, const LWOZONEID& zoneId) override;
 	std::vector<IPropertyContents::Model> GetPropertyModels(const LWOOBJID& propertyId) override;
 	void RemoveUnreferencedUgcModels() override;
 	void InsertNewPropertyModel(const LWOOBJID& propertyId, const IPropertyContents::Model& model, const std::string_view name) override;
-	void UpdateModel(const LWOOBJID& propertyId, const NiPoint3& position, const NiQuaternion& rotation, const std::array<std::pair<int32_t, std::string>, 5>& behaviors) override;
+	void UpdateModel(const LWOOBJID& modelID, const NiPoint3& position, const NiQuaternion& rotation, const std::array<std::pair<LWOOBJID, std::string>, 5>& behaviors) override;
 	void RemoveModel(const LWOOBJID& modelId) override;
 	void UpdatePerformanceCost(const LWOZONEID& zoneId, const float performanceCost) override;
 	void InsertNewBugReport(const IBugReports::Info& info) override;
 	void InsertCheatDetection(const IPlayerCheatDetections::Info& info) override;
-	void InsertNewMail(const IMail::MailInfo& mail) override;
+	void InsertNewMail(const MailInfo& mail) override;
 	void InsertNewUgcModel(
-		std::istringstream& sd0Data,
+		std::stringstream& sd0Data,
 		const uint32_t blueprintId,
 		const uint32_t accountId,
 		const uint32_t characterId) override;
-	std::vector<IMail::MailInfo> GetMailForPlayer(const uint32_t characterId, const uint32_t numberOfMail) override;
-	std::optional<IMail::MailInfo> GetMail(const uint64_t mailId) override;
+	std::vector<MailInfo> GetMailForPlayer(const uint32_t characterId, const uint32_t numberOfMail) override;
+	std::optional<MailInfo> GetMail(const uint64_t mailId) override;
 	uint32_t GetUnreadMailCount(const uint32_t characterId) override;
 	void MarkMailRead(const uint64_t mailId) override;
 	void DeleteMail(const uint64_t mailId) override;
@@ -96,7 +97,7 @@ public:
 	void UpdateAccountBan(const uint32_t accountId, const bool banned) override;
 	void UpdateAccountPassword(const uint32_t accountId, const std::string_view bcryptpassword) override;
 	void InsertNewAccount(const std::string_view username, const std::string_view bcryptpassword) override;
-	void SetMasterIp(const std::string_view ip, const uint32_t port) override;
+	void SetMasterInfo(const IServers::MasterInfo& info) override;
 	std::optional<uint32_t> GetCurrentPersistentId() override;
 	void InsertDefaultPersistentId() override;
 	void UpdatePersistentId(const uint32_t id) override;
@@ -109,9 +110,25 @@ public:
 	void InsertRewardCode(const uint32_t account_id, const uint32_t reward_code) override;
 	std::vector<uint32_t> GetRewardCodesByAccountID(const uint32_t account_id) override;
 	void AddBehavior(const IBehaviors::Info& info) override;
-	std::string GetBehavior(const int32_t behaviorId) override;
-	void RemoveBehavior(const int32_t characterId) override;
+	std::string GetBehavior(const LWOOBJID behaviorId) override;
+	void RemoveBehavior(const LWOOBJID characterId) override;
 	void UpdateAccountGmLevel(const uint32_t accountId, const eGameMasterLevel gmLevel) override;
+	std::optional<IProperty::PropertyEntranceResult> GetProperties(const IProperty::PropertyLookup& params) override;
+	std::vector<ILeaderboard::Entry> GetDescendingLeaderboard(const uint32_t activityId) override;
+	std::vector<ILeaderboard::Entry> GetAscendingLeaderboard(const uint32_t activityId) override;
+	std::vector<ILeaderboard::Entry> GetNsLeaderboard(const uint32_t activityId) override;
+	std::vector<ILeaderboard::Entry> GetAgsLeaderboard(const uint32_t activityId) override;
+	void SaveScore(const uint32_t playerId, const uint32_t gameId, const Score& score) override;
+	void UpdateScore(const uint32_t playerId, const uint32_t gameId, const Score& score) override;
+	std::optional<ILeaderboard::Score> GetPlayerScore(const uint32_t playerId, const uint32_t gameId) override;
+	void IncrementNumWins(const uint32_t playerId, const uint32_t gameId) override;
+	void IncrementTimesPlayed(const uint32_t playerId, const uint32_t gameId) override;
+	void InsertUgcBuild(const std::string& modules, const LWOOBJID bigId, const std::optional<uint32_t> characterId) override;
+	void DeleteUgcBuild(const LWOOBJID bigId) override;
+	uint32_t GetAccountCount() override;
+	bool IsNameInUse(const std::string_view name) override;
+	IPropertyContents::Model GetModel(const LWOOBJID modelID) override;
+	sql::PreparedStatement* CreatePreppedStmt(const std::string& query);
 private:
 
 	// Generic query functions that can be used for any query.

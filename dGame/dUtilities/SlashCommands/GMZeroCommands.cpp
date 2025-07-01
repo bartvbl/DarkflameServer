@@ -12,6 +12,7 @@
 #include "VanityUtilities.h"
 #include "WorldPackets.h"
 #include "ZoneInstanceManager.h"
+#include "Database.h"
 
 // Components
 #include "BuffComponent.h"
@@ -167,6 +168,10 @@ namespace GMZeroCommands {
 			LOG("Transferring %s to Zone %i (Instance %i | Clone %i | Mythran Shift: %s) with IP %s and Port %i", entity->GetCharacter()->GetName().c_str(), zoneID, zoneInstance, zoneClone, mythranShift == true ? "true" : "false", serverIP.c_str(), serverPort);
 
 			if (entity->GetCharacter()) {
+				auto* characterComponent = entity->GetComponent<CharacterComponent>();
+				if (characterComponent) {
+					characterComponent->AddVisitedLevel(LWOZONEID(zoneID, LWOINSTANCEID_INVALID, zoneClone));
+				}
 				entity->GetCharacter()->SetZoneID(zoneID);
 				entity->GetCharacter()->SetZoneInstance(zoneInstance);
 				entity->GetCharacter()->SetZoneClone(zoneClone);
@@ -189,6 +194,10 @@ namespace GMZeroCommands {
 			LOG("Transferring %s to Zone %i (Instance %i | Clone %i | Mythran Shift: %s) with IP %s and Port %i", sysAddr.ToString(), zoneID, zoneInstance, zoneClone, mythranShift == true ? "true" : "false", serverIP.c_str(), serverPort);
 
 			if (entity->GetCharacter()) {
+				auto* characterComponent = entity->GetComponent<CharacterComponent>();
+				if (characterComponent) {
+					characterComponent->AddVisitedLevel(LWOZONEID(zoneID, LWOINSTANCEID_INVALID, zoneClone));
+				}
 				entity->GetCharacter()->SetZoneID(zoneID);
 				entity->GetCharacter()->SetZoneInstance(zoneInstance);
 				entity->GetCharacter()->SetZoneClone(zoneClone);
@@ -216,7 +225,10 @@ namespace GMZeroCommands {
 	}
 
 	void RequestMailCount(Entity* entity, const SystemAddress& sysAddr, const std::string args) {
-		Mail::HandleNotificationRequest(entity->GetSystemAddress(), entity->GetObjectID());
+		Mail::NotificationResponse response;
+		response.status = Mail::eNotificationResponse::NewMail;
+		response.mailCount = Database::Get()->GetUnreadMailCount(entity->GetCharacter()->GetID());
+		response.Send(sysAddr);
 	}
 
 	void InstanceInfo(Entity* entity, const SystemAddress& sysAddr, const std::string args) {
@@ -225,8 +237,13 @@ namespace GMZeroCommands {
 		ChatPackets::SendSystemMessage(sysAddr, u"Map: " + (GeneralUtils::to_u16string(zoneId.GetMapID())) + u"\nClone: " + (GeneralUtils::to_u16string(zoneId.GetCloneID())) + u"\nInstance: " + (GeneralUtils::to_u16string(zoneId.GetInstanceID())));
 	}
 
+	// Display the server uptime
+	void ServerUptime(Entity* entity, const SystemAddress& sysAddr, const std::string args) {
+		const auto time = Game::server->GetUptime();
+		const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(time).count();
+		ChatPackets::SendSystemMessage(sysAddr, u"Server has been up for " + GeneralUtils::to_u16string(seconds) + u" s");
+	}
+
 	//For client side commands
 	void ClientHandled(Entity* entity, const SystemAddress& sysAddr, const std::string args) {}
-
 };
-

@@ -205,7 +205,7 @@ public:
 	 *
 	 * @param item The item that represents this pet in the inventory.
 	 */
-	void AddDrainImaginationTimer(Item* item, bool fromTaming = false);
+	void AddDrainImaginationTimer(bool fromTaming = false);
 
 private:
 
@@ -249,11 +249,6 @@ private:
 	 * Cache of all the pets that are currently being tamed, indexed by tamer
 	 */
 	static std::unordered_map<LWOOBJID, LWOOBJID> currentActivities;
-
-	/**
-	 * Flags that indicate that a player has tamed a pet, indexed by the LOT of the pet
-	 */
-	static const std::map<LOT, int32_t> petFlags;
 
 	/**
 	 * The ID of the component in the pet component table
@@ -329,7 +324,7 @@ private:
 	 * Timer that tracks how long a pet has been digging up some treasure, required to spawn the treasure contents
 	 * on time
 	 */
-	float m_TresureTime;
+	float m_TreasureTime;
 
 	/**
 	 * The position that this pet was spawned at

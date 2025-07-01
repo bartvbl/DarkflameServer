@@ -30,8 +30,10 @@ class SimplePhysicsComponent : public PhysicsComponent {
 public:
 	static constexpr eReplicaComponentType ComponentType = eReplicaComponentType::SIMPLE_PHYSICS;
 
-	SimplePhysicsComponent(Entity* parent, uint32_t componentID);
+	SimplePhysicsComponent(Entity* parent, int32_t componentID);
 	~SimplePhysicsComponent() override;
+
+	void Update(const float deltaTime) override;
 
 	void Serialize(RakNet::BitStream& outBitStream, bool bIsInitialUpdate) override;
 
@@ -102,7 +104,9 @@ private:
 	/**
 	 * The current physics motion state
 	 */
-	uint32_t m_PhysicsMotionState = 0;
+	uint32_t m_PhysicsMotionState = 5;
+
+	bool m_DirtyPhysicsMotionState = true;
 
 	/**
 	 * Whether or not the entity is climbable
